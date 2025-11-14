@@ -12,11 +12,13 @@ class DatabaseConfig(BaseSettings):
     """Configuración de todas las bases de datos."""
 
     # Supabase / PostgreSQL
-    postgres_host: str = Field(..., env="POSTGRES_HOST")
+    postgres_url: str = Field(..., env="POSTGRES_URL")
+    # Mantener campos individuales como fallback (opcional)
+    postgres_host: str = Field(default="", env="POSTGRES_HOST")
     postgres_port: int = Field(5432, env="POSTGRES_PORT")
-    postgres_database: str = Field(..., env="POSTGRES_DATABASE")
-    postgres_user: str = Field(..., env="POSTGRES_USER")
-    postgres_password: str = Field(..., env="POSTGRES_PASSWORD")
+    postgres_database: str = Field(default="", env="POSTGRES_DATABASE")
+    postgres_user: str = Field(default="", env="POSTGRES_USER")
+    postgres_password: str = Field(default="", env="POSTGRES_PASSWORD")
 
     # AstraDB / Cassandra
     astra_db_token: str = Field(default="", env="ASTRA_DB_TOKEN")

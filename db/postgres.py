@@ -21,16 +21,14 @@ async def get_client() -> asyncpg.Pool:
 
     if _postgres_pool is None:
         logger.info("Creando pool de conexiones PostgreSQL")
+        logger.info(f"Conectando a: {db_config.postgres_url.split('@')[1].split('?')[0] if '@' in db_config.postgres_url else 'PostgreSQL'}")
 
         _postgres_pool = await asyncpg.create_pool(
-            host=db_config.postgres_host,
-            port=db_config.postgres_port,
-            database=db_config.postgres_database,
-            user=db_config.postgres_user,
-            password=db_config.postgres_password,
+            dsn=db_config.postgres_url,
             min_size=5,
             max_size=20,
-            command_timeout=30
+            command_timeout=30,
+            statement_cache_size=0  # Required for PgBouncer/transaction pooler
         )
 
         logger.info("Pool PostgreSQL creado exitosamente")
@@ -43,9 +41,13 @@ async def close_client():
     global _postgres_pool
 
     if _postgres_pool:
-        await _postgres_pool.close()
-        _postgres_pool = None
-        logger.info("Pool PostgreSQL cerrado")
+        try:
+            await _postgres_pool.close()
+        except Exception as e:
+            logger.warning(f"Error al cerrar pool (puede ser ignorado): {e}")
+        finally:
+            _postgres_pool = None
+            logger.info("Pool PostgreSQL cerrado")
 
 
 async def execute_query(query: str, *args):

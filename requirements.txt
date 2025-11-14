@@ -1,0 +1,20 @@
+# Core dependencies
+typer==0.12.3
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Database drivers
+asyncpg==0.29.0
+motor==3.3.2
+cassandra-driver==3.29.0
+neo4j==5.15.0
+redis==5.0.1
+
+# Utilities
+tenacity==8.2.3
+structlog==23.2.0
+python-dotenv==1.0.0
+
+# Development
+pytest==7.4.3
+pytest-asyncio==0.21.1

@@ -320,10 +320,59 @@ Todas las operaciones de DB incluyen reintentos automáticos:
 
 ## 🧪 Testing
 
-Para agregar tests, crear directorio `tests/` con:
+### Tests de Conexión a Bases de Datos
+
+El proyecto incluye scripts de prueba para verificar las conexiones a las bases de datos:
+
+#### Ejecutar todos los tests
+
+```bash
+./run_tests.sh
+```
+
+#### Ejecutar test específico
+
+```bash
+# Test PostgreSQL/Supabase
+./run_tests.sh postgres
+
+# Test Redis
+./run_tests.sh redis
+```
+
+#### Ejecutar tests manualmente
+
+```bash
+# Test PostgreSQL
+PYTHONPATH=. python tests/test_postgres.py
+
+# Test Redis
+PYTHONPATH=. python tests/test_redis.py
+```
+
+### Tests Disponibles
+
+- **`tests/test_postgres.py`**: Verifica conexión a Supabase PostgreSQL
+  - Conexión y ping
+  - Versión de PostgreSQL
+  - Extensiones disponibles
+  - Creación de tablas
+  - CRUD operations
+  - Estado del pool de conexiones
+
+- **`tests/test_redis.py`**: Verifica conexión a Redis Cloud
+  - Conexión y ping
+  - Operaciones SET/GET
+  - Expiración de claves
+  - Contadores
+  - Operaciones con Sets
+
+### Tests de Integración
+
+Para agregar más tests, crear en el directorio `tests/`:
 
 - Tests unitarios por servicio
-- Tests de integración con bases de datos mock
+- Tests de integración con bases de datos
 - Tests de CLI con datos simulados
 
 ## 🚀 Despliegue

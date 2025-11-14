@@ -19,9 +19,14 @@ class DatabaseConfig(BaseSettings):
     postgres_password: str = Field(..., env="POSTGRES_PASSWORD")
 
     # AstraDB / Cassandra
-    cassandra_bundle_path: str = Field(..., env="CASSANDRA_BUNDLE_PATH")
-    cassandra_username: str = Field(..., env="CASSANDRA_USERNAME")
-    cassandra_password: str = Field(..., env="CASSANDRA_PASSWORD")
+    astra_db_token: str = Field(default="", env="ASTRA_DB_TOKEN")
+    astra_db_endpoint: str = Field(default="", env="ASTRA_DB_ENDPOINT")
+    astra_db_keyspace: str = Field(
+        default="airbnb_metrics", env="ASTRA_DB_KEYSPACE")
+    # Legacy Cassandra config (opcional)
+    cassandra_bundle_path: str = Field(default="", env="CASSANDRA_BUNDLE_PATH")
+    cassandra_username: str = Field(default="", env="CASSANDRA_USERNAME")
+    cassandra_password: str = Field(default="", env="CASSANDRA_PASSWORD")
     cassandra_keyspace: str = Field("airbnb_ks", env="CASSANDRA_KEYSPACE")
 
     # MongoDB Atlas
@@ -29,9 +34,10 @@ class DatabaseConfig(BaseSettings):
     mongo_database: str = Field("airbnb_db", env="MONGO_DATABASE")
 
     # Neo4j AuraDB
-    neo4j_uri: str = Field(..., env="NEO4J_URI")
-    neo4j_user: str = Field(..., env="NEO4J_USER")
-    neo4j_password: str = Field(..., env="NEO4J_PASSWORD")
+    neo4j_uri: str = Field(default="", env="NEO4J_URI")
+    neo4j_user: str = Field(default="neo4j", env="NEO4J_USER")
+    neo4j_password: str = Field(default="", env="NEO4J_PASSWORD")
+    neo4j_database: str = Field(default="neo4j", env="NEO4J_DATABASE")
 
     # Redis Cloud
     redis_host: str = Field(..., env="REDIS_HOST")

@@ -34,8 +34,7 @@ class DatabaseConfig(BaseSettings):
     mongo_database: str = Field("airbnb_db", env="MONGO_DATABASE")
 
     # Neo4j AuraDB
-    neo4j_uri: str = Field(
-        default="neo4j+s://26ff39e3.databases.neo4j.io", env="NEO4J_URI")
+    neo4j_uri: str = Field(default="", env="NEO4J_URI")
     neo4j_user: str = Field(default="neo4j", env="NEO4J_USER")
     neo4j_password: str = Field(default="", env="NEO4J_PASSWORD")
     neo4j_database: str = Field(default="neo4j", env="NEO4J_DATABASE")

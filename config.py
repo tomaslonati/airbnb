@@ -40,11 +40,15 @@ class DatabaseConfig(BaseSettings):
     neo4j_database: str = Field(default="neo4j", env="NEO4J_DATABASE")
 
     # Redis Cloud
-    redis_url: str = Field(..., env="REDIS_URL")
+    redis_host: str = Field(..., env="REDIS_HOST")
+    redis_port: int = Field(6379, env="REDIS_PORT")
+    redis_username: str = Field("default", env="REDIS_USERNAME")
+    redis_password: str = Field(..., env="REDIS_PASSWORD")
 
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"  # Ignorar campos extra del .env
 
 
 class AppConfig(BaseSettings):
@@ -59,6 +63,7 @@ class AppConfig(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"  # Ignorar campos extra del .env
 
 
 # Instancias globales de configuración

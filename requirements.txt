@@ -12,9 +12,9 @@ neo4j==5.15.0
 redis==5.0.1
 
 # Utilities
-tenacity==8.2.3
-structlog==23.2.0
-python-dotenv==1.0.0
+tenacity==8.2.3          # Retry logic with exponential backoff
+structlog==23.2.0        # Structured logging
+python-dotenv==1.0.0     # Environment variables
 
 # Development
 pytest==7.4.3

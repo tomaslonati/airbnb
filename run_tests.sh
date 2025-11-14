@@ -39,6 +39,13 @@ run_redis_test() {
     echo ""
 }
 
+# Función para ejecutar test de MongoDB
+run_mongo_test() {
+    echo -e "${GREEN}Ejecutando test de MongoDB...${NC}"
+    python tests/test_mongo.py
+    echo ""
+}
+
 # Determinar qué tests ejecutar
 case "${1:-all}" in
     postgres)
@@ -50,13 +57,17 @@ case "${1:-all}" in
     redis)
         run_redis_test
         ;;
+    mongo)
+        run_mongo_test
+        ;;
     all)
         run_postgres_test
         run_postgres_helpers_test
         run_redis_test
+        run_mongo_test
         ;;
     *)
-        echo "Uso: $0 [postgres|postgres-helpers|redis|all]"
+        echo "Uso: $0 [postgres|postgres-helpers|redis|mongo|all]"
         exit 1
         ;;
 esac

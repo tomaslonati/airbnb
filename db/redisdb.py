@@ -22,8 +22,12 @@ async def get_client() -> redis.Redis:
     if _redis_client is None:
         logger.info("Creando cliente Redis")
 
-        _redis_client = redis.from_url(
-            db_config.redis_url,
+        _redis_client = redis.Redis(
+            host=db_config.redis_host,
+            port=db_config.redis_port,
+            username=db_config.redis_username,
+            password=db_config.redis_password,
+            decode_responses=True,
             max_connections=20,
             retry_on_timeout=True,
             socket_timeout=5,
@@ -51,7 +55,7 @@ async def get_key(key: str) -> Optional[str]:
     """Obtiene el valor de una clave."""
     client = await get_client()
     value = await client.get(key)
-    return value.decode('utf-8') if value else None
+    return value  # decode_responses=True ya devuelve str
 
 
 async def set_key(key: str, value: str, expire: int = None):
@@ -77,7 +81,7 @@ async def get_hash(key: str, field: str = None):
     client = await get_client()
     if field:
         value = await client.hget(key, field)
-        return value.decode('utf-8') if value else None
+        return value  # decode_responses=True ya devuelve str
     else:
         hash_data = await client.hgetall(key)
-        return {k.decode('utf-8'): v.decode('utf-8') for k, v in hash_data.items()}
+        return hash_data  # decode_responses=True ya devuelve dict[str, str]

@@ -13,85 +13,237 @@ logger = get_logger(__name__)
 class PropertyService:
     """Servicio para crear, actualizar y gestionar propiedades."""
 
+    async def _validate_foreign_keys(
+        self,
+        pool,
+        ciudad_id: int,
+        anfitrion_id: int,
+        tipo_propiedad_id: int,
+        amenities: Optional[List[int]] = None,
+        servicios: Optional[List[int]] = None,
+        reglas: Optional[List[int]] = None,
+    ) -> tuple[bool, Optional[str]]:
+        """
+        Valida que todos los IDs externos existan.
+        
+        Returns:
+            (is_valid, error_message)
+        """
+        try:
+            # Validar ciudad
+            ciudad = await pool.fetchval(
+                "SELECT id FROM ciudad WHERE id = $1",
+                ciudad_id
+            )
+            if not ciudad:
+                return False, f"Ciudad con ID {ciudad_id} no existe"
+
+            # Validar anfitrión
+            anfitrion = await pool.fetchval(
+                "SELECT id FROM anfitrion WHERE id = $1",
+                anfitrion_id
+            )
+            if not anfitrion:
+                return False, f"Anfitrión con ID {anfitrion_id} no existe"
+
+            # Validar tipo de propiedad
+            tipo = await pool.fetchval(
+                "SELECT id FROM tipo_propiedad WHERE id = $1",
+                tipo_propiedad_id
+            )
+            if not tipo:
+                return False, f"Tipo de propiedad con ID {tipo_propiedad_id} no existe"
+
+            # Validar amenities
+            if amenities:
+                for amenity_id in amenities:
+                    amenity = await pool.fetchval(
+                        "SELECT id FROM amenities WHERE id = $1",
+                        amenity_id
+                    )
+                    if not amenity:
+                        return False, f"Amenity con ID {amenity_id} no existe"
+
+            # Validar servicios
+            if servicios:
+                for servicio_id in servicios:
+                    servicio = await pool.fetchval(
+                        "SELECT id FROM servicios WHERE id = $1",
+                        servicio_id
+                    )
+                    if not servicio:
+                        return False, f"Servicio con ID {servicio_id} no existe"
+
+            # Validar reglas
+            if reglas:
+                for regla_id in reglas:
+                    regla = await pool.fetchval(
+                        "SELECT id FROM regla_propiedad WHERE id = $1",
+                        regla_id
+                    )
+                    if not regla:
+                        return False, f"Regla con ID {regla_id} no existe"
+
+            return True, None
+
+        except Exception as e:
+            logger.error(f"Error en validación de FKs: {e}")
+            return False, f"Error al validar datos: {str(e)}"
+
+    async def _get_host_id_from_auth(
+        self,
+        pool,
+        auth_user_id: str
+    ) -> Optional[int]:
+        """
+        Obtiene el anfitrion_id a partir del auth_user_id.
+        """
+        try:
+            result = await pool.fetchval(
+                """
+                SELECT a.id
+                FROM anfitrion a
+                JOIN usuario u ON u.id = a.usuario_id
+                WHERE u.auth_user_id = $1
+                """,
+                auth_user_id
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Error obteniendo host_id desde auth: {e}")
+            return None
+
     async def create_property(
         self,
         nombre: str,
         descripcion: str,
         capacidad: int,
         ciudad_id: int,
-        anfitrion_id: int,
-        tipo_propiedad_id: int,
+        anfitrion_id: Optional[int] = None,
+        auth_user_id: Optional[str] = None,
+        tipo_propiedad_id: int = 1,
         imagenes: Optional[List[str]] = None,
         amenities: Optional[List[int]] = None,
         servicios: Optional[List[int]] = None,
         reglas: Optional[List[int]] = None,
+        generar_calendario: bool = True,
+        dias_calendario: int = 365,
     ) -> Dict[str, Any]:
         """
-        Crea una nueva propiedad.
+        Crea una nueva propiedad de forma atómica.
         
         Args:
             nombre: Nombre de la propiedad
             descripcion: Descripción detallada
-            capacidad: Cantidad de personas que puede albergar
+            capacidad: Cantidad de personas
             ciudad_id: ID de la ciudad
-            anfitrion_id: ID del anfitrión
+            anfitrion_id: ID del anfitrión (alternativa)
+            auth_user_id: auth_user_id de Supabase (si anfitrion_id es None)
             tipo_propiedad_id: ID del tipo de propiedad
-            imagenes: Lista de URLs de imágenes
-            amenities: Lista de IDs de amenities
-            servicios: Lista de IDs de servicios
-            reglas: Lista de IDs de reglas
+            imagenes: URLs de imágenes
+            amenities: IDs de amenities
+            servicios: IDs de servicios
+            reglas: IDs de reglas
+            generar_calendario: Generar calendario base
+            dias_calendario: Cuántos días de calendario generar
             
         Returns:
-            Resultado de la creación
+            Resultado de la creación (success, error, o property_id)
         """
         try:
             pool = await postgres.get_client()
             
-            logger.info(f"Creando propiedad: {nombre}")
+            # Si viene auth_user_id, resolver anfitrion_id
+            if auth_user_id and not anfitrion_id:
+                anfitrion_id = await self._get_host_id_from_auth(pool, auth_user_id)
+                if not anfitrion_id:
+                    return {
+                        "success": False,
+                        "error": "Usuario no está registrado como anfitrión"
+                    }
             
-            # Crear la propiedad
-            query = """
-                INSERT INTO propiedad (
-                    nombre, descripcion, capacidad, 
-                    ciudad_id, anfitrion_id, tipo_propiedad_id, imagenes
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                RETURNING id, nombre, descripcion, capacidad, ciudad_id, anfitrion_id, tipo_propiedad_id
-            """
-            
-            result = await pool.fetchrow(
-                query,
-                nombre,
-                descripcion,
-                capacidad,
+            if not anfitrion_id:
+                return {
+                    "success": False,
+                    "error": "Debes proporcionar anfitrion_id o auth_user_id"
+                }
+
+            logger.info(f"Validando datos para propiedad: {nombre}")
+
+            # Validar todos los IDs externos
+            is_valid, error_msg = await self._validate_foreign_keys(
+                pool,
                 ciudad_id,
                 anfitrion_id,
                 tipo_propiedad_id,
-                imagenes or []
+                amenities,
+                servicios,
+                reglas
             )
-            
-            propiedad_id = result['id']
-            logger.info(f"Propiedad creada con ID: {propiedad_id}")
-            
-            # Agregar amenities
-            if amenities:
-                await self._add_amenities(pool, propiedad_id, amenities)
-            
-            # Agregar servicios
-            if servicios:
-                await self._add_servicios(pool, propiedad_id, servicios)
-            
-            # Agregar reglas
-            if reglas:
-                await self._add_reglas(pool, propiedad_id, reglas)
-            
+
+            if not is_valid:
+                logger.warning(f"Validación fallida: {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg
+                }
+
+            logger.info(f"Creando propiedad: {nombre}")
+
+            # TRANSACCIÓN ATÓMICA: Iniciar
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    # 1. Crear la propiedad
+                    query = """
+                        INSERT INTO propiedad (
+                            nombre, descripcion, capacidad, 
+                            ciudad_id, anfitrion_id, tipo_propiedad_id, imagenes
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        RETURNING id, nombre, descripcion, capacidad
+                    """
+                    
+                    result = await conn.fetchrow(
+                        query,
+                        nombre,
+                        descripcion,
+                        capacidad,
+                        ciudad_id,
+                        anfitrion_id,
+                        tipo_propiedad_id,
+                        imagenes or []
+                    )
+                    
+                    propiedad_id = result['id']
+                    logger.info(f"Propiedad creada con ID: {propiedad_id}")
+
+                    # 2. Agregar amenities (dentro de la transacción)
+                    if amenities:
+                        await self._add_amenities(conn, propiedad_id, amenities)
+
+                    # 3. Agregar servicios (dentro de la transacción)
+                    if servicios:
+                        await self._add_servicios(conn, propiedad_id, servicios)
+
+                    # 4. Agregar reglas (dentro de la transacción)
+                    if reglas:
+                        await self._add_reglas(conn, propiedad_id, reglas)
+
+                    # 5. Generar calendario base (dentro de la transacción)
+                    if generar_calendario:
+                        await self._generate_availability(
+                            conn, propiedad_id, dias_calendario
+                        )
+
+            logger.info(f"Propiedad {propiedad_id} creada exitosamente con todas las relaciones")
+
             return {
                 "success": True,
                 "message": f"Propiedad '{nombre}' creada exitosamente",
                 "property_id": propiedad_id,
                 "property": dict(result)
             }
-            
+
         except Exception as e:
             logger.error(f"Error al crear propiedad: {e}")
             return {
@@ -99,8 +251,8 @@ class PropertyService:
                 "error": str(e)
             }
 
-    async def _add_amenities(self, pool, propiedad_id: int, amenity_ids: List[int]):
-        """Agrega amenities a una propiedad."""
+    async def _add_amenities(self, conn, propiedad_id: int, amenity_ids: List[int]):
+        """Agrega amenities a una propiedad (dentro de transacción)."""
         try:
             query = """
                 INSERT INTO propiedad_amenity (propiedad_id, amenity_id)
@@ -109,14 +261,15 @@ class PropertyService:
             """
             
             for amenity_id in amenity_ids:
-                await pool.execute(query, propiedad_id, amenity_id)
+                await conn.execute(query, propiedad_id, amenity_id)
             
             logger.info(f"Agregados {len(amenity_ids)} amenities a propiedad {propiedad_id}")
         except Exception as e:
             logger.error(f"Error al agregar amenities: {e}")
+            raise
 
-    async def _add_servicios(self, pool, propiedad_id: int, servicio_ids: List[int]):
-        """Agrega servicios a una propiedad."""
+    async def _add_servicios(self, conn, propiedad_id: int, servicio_ids: List[int]):
+        """Agrega servicios a una propiedad (dentro de transacción)."""
         try:
             query = """
                 INSERT INTO propiedad_servicio (propiedad_id, servicio_id)
@@ -125,14 +278,15 @@ class PropertyService:
             """
             
             for servicio_id in servicio_ids:
-                await pool.execute(query, propiedad_id, servicio_id)
+                await conn.execute(query, propiedad_id, servicio_id)
             
             logger.info(f"Agregados {len(servicio_ids)} servicios a propiedad {propiedad_id}")
         except Exception as e:
             logger.error(f"Error al agregar servicios: {e}")
+            raise
 
-    async def _add_reglas(self, pool, propiedad_id: int, regla_ids: List[int]):
-        """Agrega reglas a una propiedad."""
+    async def _add_reglas(self, conn, propiedad_id: int, regla_ids: List[int]):
+        """Agrega reglas a una propiedad (dentro de transacción)."""
         try:
             query = """
                 INSERT INTO propiedad_regla (propiedad_id, regla_id)
@@ -141,18 +295,48 @@ class PropertyService:
             """
             
             for regla_id in regla_ids:
-                await pool.execute(query, propiedad_id, regla_id)
+                await conn.execute(query, propiedad_id, regla_id)
             
             logger.info(f"Agregadas {len(regla_ids)} reglas a propiedad {propiedad_id}")
         except Exception as e:
             logger.error(f"Error al agregar reglas: {e}")
+            raise
+
+    async def _generate_availability(
+        self, 
+        conn, 
+        propiedad_id: int, 
+        dias: int = 365
+    ):
+        """Genera disponibilidad base para los próximos N días."""
+        try:
+            from datetime import datetime, timedelta
+            
+            query = """
+                INSERT INTO fecha (propiedad_id, fecha, tarifa, esta_disponible)
+                VALUES ($1, $2, $3, true)
+                ON CONFLICT DO NOTHING
+            """
+            
+            fecha_inicio = datetime.now().date()
+            tarifa_base = 100.0  # Tarifa por defecto
+            
+            for i in range(dias):
+                fecha = fecha_inicio + timedelta(days=i)
+                await conn.execute(query, propiedad_id, fecha, tarifa_base)
+            
+            logger.info(f"Generado calendario para {dias} días para propiedad {propiedad_id}")
+        except Exception as e:
+            logger.error(f"Error al generar disponibilidad: {e}")
+            raise
 
     async def get_property(self, propiedad_id: int) -> Dict[str, Any]:
-        """Obtiene los detalles de una propiedad."""
+        """Obtiene los detalles completos de una propiedad incluyendo relaciones."""
         try:
             pool = await postgres.get_client()
             
-            query = """
+            # Obtener propiedad base
+            prop_query = """
                 SELECT p.*, c.nombre as ciudad, t.nombre as tipo_propiedad
                 FROM propiedad p
                 JOIN ciudad c ON p.ciudad_id = c.id
@@ -160,12 +344,53 @@ class PropertyService:
                 WHERE p.id = $1
             """
             
-            result = await pool.fetchrow(query, propiedad_id)
+            prop = await pool.fetchrow(prop_query, propiedad_id)
             
-            if not result:
+            if not prop:
                 return {"success": False, "error": "Propiedad no encontrada"}
             
-            return {"success": True, "property": dict(result)}
+            # Obtener amenities
+            amenities = await pool.fetch(
+                """
+                SELECT a.id, a.descripcion
+                FROM amenities a
+                JOIN propiedad_amenity pa ON pa.amenity_id = a.id
+                WHERE pa.propiedad_id = $1
+                """,
+                propiedad_id
+            )
+            
+            # Obtener servicios
+            servicios = await pool.fetch(
+                """
+                SELECT s.id, s.descripcion
+                FROM servicios s
+                JOIN propiedad_servicio ps ON ps.servicio_id = s.id
+                WHERE ps.propiedad_id = $1
+                """,
+                propiedad_id
+            )
+            
+            # Obtener reglas
+            reglas = await pool.fetch(
+                """
+                SELECT r.id, r.descripcion
+                FROM regla_propiedad r
+                JOIN propiedad_regla pr ON pr.regla_id = r.id
+                WHERE pr.propiedad_id = $1
+                """,
+                propiedad_id
+            )
+            
+            return {
+                "success": True,
+                "property": {
+                    **dict(prop),
+                    "amenities": [dict(a) for a in amenities],
+                    "servicios": [dict(s) for s in servicios],
+                    "reglas": [dict(r) for r in reglas]
+                }
+            }
             
         except Exception as e:
             logger.error(f"Error al obtener propiedad: {e}")
@@ -222,3 +447,4 @@ class PropertyService:
         except Exception as e:
             logger.error(f"Error al listar propiedades del anfitrión: {e}")
             return {"success": False, "error": str(e)}
+

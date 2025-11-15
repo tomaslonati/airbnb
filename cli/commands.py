@@ -655,5 +655,64 @@ def get_property(
     asyncio.run(_get())
 
 
+@app.command()
+def update_property(
+    propiedad_id: int = typer.Argument(..., help="ID de la propiedad"),
+    nombre: Optional[str] = typer.Option(None, "--nombre", "-n", help="Nuevo nombre"),
+    descripcion: Optional[str] = typer.Option(None, "--descripcion", "-d", help="Nueva descripción"),
+    capacidad: Optional[int] = typer.Option(None, "--capacidad", "-c", help="Nueva capacidad"),
+    tipo_propiedad_id: Optional[int] = typer.Option(None, "--tipo", "-t", help="Nuevo tipo de propiedad"),
+):
+    """Actualiza los datos de una propiedad."""
+    from services.properties import PropertyService
+    
+    async def _update():
+        service = PropertyService()
+        result = await service.update_property(
+            propiedad_id,
+            nombre=nombre,
+            descripcion=descripcion,
+            capacidad=capacidad,
+            tipo_propiedad_id=tipo_propiedad_id
+        )
+        
+        if result["success"]:
+            typer.echo(f"✅ {result['message']}")
+            prop = result["property"]
+            typer.echo(f"   ID: {prop['id']}")
+            typer.echo(f"   Nombre: {prop['nombre']}")
+            typer.echo(f"   Capacidad: {prop['capacidad']} personas")
+        else:
+            typer.echo(f"❌ Error: {result['error']}")
+    
+    asyncio.run(_update())
+
+
+@app.command()
+def delete_property(
+    propiedad_id: int = typer.Argument(..., help="ID de la propiedad"),
+    confirm: bool = typer.Option(False, "--confirm", "-y", help="Confirmar eliminación sin preguntar"),
+):
+    """Elimina una propiedad y todas sus relaciones."""
+    from services.properties import PropertyService
+    
+    async def _delete():
+        if not confirm:
+            typer.echo(f"⚠️  Esta acción eliminará la propiedad {propiedad_id} y todos sus datos asociados.")
+            if not typer.confirm("¿Estás seguro de que quieres continuar?"):
+                typer.echo("❌ Operación cancelada")
+                return
+        
+        service = PropertyService()
+        result = await service.delete_property(propiedad_id)
+        
+        if result["success"]:
+            typer.echo(f"✅ {result['message']}")
+        else:
+            typer.echo(f"❌ Error: {result['error']}")
+    
+    asyncio.run(_delete())
+
+
 if __name__ == "__main__":
     app()

@@ -448,3 +448,166 @@ class PropertyService:
             logger.error(f"Error al listar propiedades del anfitrión: {e}")
             return {"success": False, "error": str(e)}
 
+    async def update_property(
+        self,
+        property_id: int,
+        nombre: str = None,
+        descripcion: str = None,
+        capacidad: int = None,
+        tipo_propiedad_id: int = None,
+        imagenes: List[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Actualiza los datos básicos de una propiedad.
+        
+        Args:
+            property_id: ID de la propiedad
+            nombre: Nuevo nombre (opcional)
+            descripcion: Nueva descripción (opcional)
+            capacidad: Nueva capacidad (opcional)
+            tipo_propiedad_id: Nuevo tipo de propiedad (opcional)
+            imagenes: Nuevas imágenes (opcional)
+            
+        Returns:
+            Resultado de la actualización
+        """
+        try:
+            pool = await postgres.get_client()
+            
+            # Construir query dinámico con los campos a actualizar
+            updates = []
+            params = []
+            param_idx = 1
+            
+            if nombre is not None:
+                updates.append(f"nombre = ${param_idx}")
+                params.append(nombre)
+                param_idx += 1
+            
+            if descripcion is not None:
+                updates.append(f"descripcion = ${param_idx}")
+                params.append(descripcion)
+                param_idx += 1
+            
+            if capacidad is not None:
+                updates.append(f"capacidad = ${param_idx}")
+                params.append(capacidad)
+                param_idx += 1
+            
+            if tipo_propiedad_id is not None:
+                updates.append(f"tipo_propiedad_id = ${param_idx}")
+                params.append(tipo_propiedad_id)
+                param_idx += 1
+            
+            if imagenes is not None:
+                updates.append(f"imagenes = ${param_idx}")
+                params.append(imagenes)
+                param_idx += 1
+            
+            if not updates:
+                return {
+                    "success": False,
+                    "error": "No hay campos para actualizar"
+                }
+            
+            params.append(property_id)  # Para WHERE clause
+            
+            query = f"""
+                UPDATE propiedad
+                SET {', '.join(updates)}
+                WHERE id = ${param_idx}
+                RETURNING id, nombre, descripcion, capacidad, tipo_propiedad_id
+            """
+            
+            async with pool.acquire() as conn:
+                result = await conn.fetchrow(query, *params)
+            
+            if not result:
+                return {
+                    "success": False,
+                    "error": f"Propiedad con ID {property_id} no existe"
+                }
+            
+            logger.info(f"Propiedad {property_id} actualizada")
+            
+            return {
+                "success": True,
+                "message": "Propiedad actualizada",
+                "property": dict(result)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error al actualizar propiedad: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def delete_property(self, property_id: int) -> Dict[str, Any]:
+        """
+        Elimina una propiedad y todas sus relaciones (en transacción).
+        
+        Args:
+            property_id: ID de la propiedad a eliminar
+            
+        Returns:
+            Resultado de la eliminación
+        """
+        try:
+            pool = await postgres.get_client()
+            
+            logger.info(f"Eliminando propiedad {property_id}")
+            
+            # TRANSACCIÓN ATÓMICA: Eliminar propiedad y todas las relaciones
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    # 1. Eliminar amenities
+                    await conn.execute(
+                        "DELETE FROM propiedad_amenity WHERE propiedad_id = $1",
+                        property_id
+                    )
+                    
+                    # 2. Eliminar servicios
+                    await conn.execute(
+                        "DELETE FROM propiedad_servicio WHERE propiedad_id = $1",
+                        property_id
+                    )
+                    
+                    # 3. Eliminar reglas
+                    await conn.execute(
+                        "DELETE FROM propiedad_regla WHERE propiedad_id = $1",
+                        property_id
+                    )
+                    
+                    # 4. Eliminar disponibilidad (calendario)
+                    await conn.execute(
+                        "DELETE FROM fecha WHERE propiedad_id = $1",
+                        property_id
+                    )
+                    
+                    # 5. Eliminar reservas (si existen)
+                    await conn.execute(
+                        "DELETE FROM reserva WHERE propiedad_id = $1",
+                        property_id
+                    )
+                    
+                    # 6. Finalmente, eliminar la propiedad
+                    result = await conn.fetchval(
+                        "DELETE FROM propiedad WHERE id = $1 RETURNING id",
+                        property_id
+                    )
+            
+            if result is None:
+                return {
+                    "success": False,
+                    "error": f"Propiedad con ID {property_id} no existe"
+                }
+            
+            logger.info(f"Propiedad {property_id} eliminada exitosamente")
+            
+            return {
+                "success": True,
+                "message": f"Propiedad {property_id} eliminada con todas sus relaciones"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error al eliminar propiedad: {e}")
+            return {"success": False, "error": str(e)}
+

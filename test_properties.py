@@ -154,6 +154,73 @@ async def test_properties():
         print(f"   Mensaje: {invalid_amenity_result['error']}")
     else:
         print(f"❌ ERROR: Debería haber fallado con amenity_id inválido")
+
+    # TEST 7: Actualizar propiedad
+    print("\n" + "-"*70)
+    print("✅ TEST 7: Actualizar propiedad")
+    print("-"*70)
+    
+    property_to_update = property_id  # Usar la ID del TEST 1
+    update_result = await service.update_property(
+        property_to_update,
+        nombre="Depto Actualizado - Palermo",
+        capacidad=5,
+        descripcion="Departamento mejorado con actualizaciones"
+    )
+    
+    if update_result["success"]:
+        print(f"✅ Propiedad actualizada:")
+        print(f"   ID: {update_result['property']['id']}")
+        print(f"   Nuevo nombre: {update_result['property']['nombre']}")
+        print(f"   Nueva capacidad: {update_result['property']['capacidad']}")
+    else:
+        print(f"❌ ERROR: {update_result['error']}")
+
+    # Verificar que la actualización se guardó
+    verify_result = await service.get_property(property_to_update)
+    if verify_result["success"] and verify_result["property"]["nombre"] == "Depto Actualizado - Palermo":
+        print(f"✅ Actualización verificada en BD")
+    else:
+        print(f"❌ ERROR: Actualización no se guardó correctamente")
+
+    # TEST 8: Eliminar propiedad
+    print("\n" + "-"*70)
+    print("✅ TEST 8: Eliminar propiedad")
+    print("-"*70)
+    
+    # Primero crear una propiedad temporal para eliminar
+    temp_property_data = {
+        "nombre": f"Propiedad Temporal - {hash('delete_test') % 10000}",
+        "descripcion": "Esta propiedad será eliminada",
+        "capacidad": 2,
+        "ciudad_id": 1,
+        "anfitrion_id": 1,
+        "tipo_propiedad_id": 1,
+        "amenities": [1],
+        "servicios": [1],
+        "generar_calendario": True,
+        "dias_calendario": 10
+    }
+    
+    temp_result = await service.create_property(**temp_property_data)
+    temp_property_id = temp_result["property_id"]
+    print(f"📝 Propiedad temporal creada con ID: {temp_property_id}")
+    
+    # Eliminar la propiedad temporal
+    delete_result = await service.delete_property(temp_property_id)
+    
+    if delete_result["success"]:
+        print(f"✅ Propiedad eliminada:")
+        print(f"   {delete_result['message']}")
+    else:
+        print(f"❌ ERROR: {delete_result['error']}")
+    
+    # Verificar que se eliminó
+    verify_delete = await service.get_property(temp_property_id)
+    if not verify_delete["success"] and ("no existe" in verify_delete.get("error", "") or "no encontrada" in verify_delete.get("error", "")):
+        print(f"✅ Eliminación verificada - Propiedad no existe en BD")
+    else:
+        print(f"❌ ERROR: Propiedad aún existe en BD después de eliminar (respuesta: {verify_delete})")
     
     print("\n" + "="*70)
     print("✨ Pruebas completadas")

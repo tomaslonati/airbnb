@@ -285,8 +285,7 @@ async def show_mongo_stats(user_profile):
 
 @app.command(name="auth-cmd")
 def auth_cmd(
-    action: str = typer.Argument(
-        ..., help="Acción: 'login', 'register', 'logout', 'profile', o 'status'"),
+    action: str = typer.Argument(...),
     email: Optional[str] = typer.Option(
         None, "--email", "-e", help="Email del usuario"),
     password: Optional[str] = typer.Option(
@@ -405,8 +404,7 @@ def auth_cmd(
 
 @app.command(name="mongo-cmd")
 def mongo_cmd(
-    action: str = typer.Argument(
-        ..., help="Acción: 'hosts', 'ratings', 'add-rating', 'stats'"),
+    action: str = typer.Argument(...),
     host_id: Optional[int] = typer.Option(
         None, "--host-id", "-h", help="ID del anfitrión"),
     rating: Optional[int] = typer.Option(
@@ -504,8 +502,7 @@ def mongo_cmd(
 
 @app.command(name="users-cmd")
 def users_cmd(
-    action: str = typer.Argument(
-        ..., help="Acción: 'list', 'profile', 'stats'"),
+    action: str = typer.Argument(...),
     email: Optional[str] = typer.Option(
         None, "--email", "-e", help="Email del usuario"),
     user_id: Optional[int] = typer.Option(
@@ -567,30 +564,66 @@ def users_cmd(
 
 @app.command()
 def create_property(
-    nombre: str = typer.Argument(..., help="Nombre de la propiedad"),
-    descripcion: str = typer.Argument(..., help="Descripción de la propiedad"),
-    capacidad: int = typer.Argument(..., help="Capacidad de personas"),
-    ciudad_id: int = typer.Option(..., "--ciudad-id", "-c", help="ID de la ciudad"),
-    anfitrion_id: int = typer.Option(..., "--anfitrion-id", "-a", help="ID del anfitrión"),
-    tipo_propiedad_id: int = typer.Option(..., "--tipo-id", "-t", help="ID del tipo de propiedad"),
+    nombre: str = typer.Argument(...),
+    descripcion: str = typer.Argument(...),
+    capacidad: int = typer.Argument(...),
+    ciudad_id: int = typer.Option(..., "--ciudad-id", "-c"),
+    anfitrion_id: int = typer.Option(..., "--anfitrion-id", "-a"),
+    tipo_propiedad_id: int = typer.Option(1, "--tipo-id", "-t"),
+    amenities: Optional[str] = typer.Option(None, "--amenities", "-am"),
+    servicios: Optional[str] = typer.Option(None, "--servicios", "-s"),
+    reglas: Optional[str] = typer.Option(None, "--reglas", "-r"),
 ):
-    """Crea una nueva propiedad."""
+    """Crea una nueva propiedad con amenities, servicios y reglas."""
     from services.properties import PropertyService
     
     async def _create():
         service = PropertyService()
+        
+        # Parsear las listas de IDs
+        amenity_ids = None
+        if amenities:
+            try:
+                amenity_ids = [int(x.strip()) for x in amenities.split(",")]
+            except ValueError:
+                typer.echo("❌ Error: Amenities debe ser una lista de números separados por comas (ej: 1,2,3)")
+                return
+        
+        servicio_ids = None
+        if servicios:
+            try:
+                servicio_ids = [int(x.strip()) for x in servicios.split(",")]
+            except ValueError:
+                typer.echo("❌ Error: Servicios debe ser una lista de números separados por comas (ej: 1,2)")
+                return
+        
+        regla_ids = None
+        if reglas:
+            try:
+                regla_ids = [int(x.strip()) for x in reglas.split(",")]
+            except ValueError:
+                typer.echo("❌ Error: Reglas debe ser una lista de números separados por comas (ej: 1,2)")
+                return
+        
         result = await service.create_property(
             nombre=nombre,
             descripcion=descripcion,
             capacidad=capacidad,
             ciudad_id=ciudad_id,
             anfitrion_id=anfitrion_id,
-            tipo_propiedad_id=tipo_propiedad_id
+            tipo_propiedad_id=tipo_propiedad_id,
+            amenities=amenity_ids,
+            servicios=servicio_ids,
+            reglas=regla_ids,
+            generar_calendario=True,
+            dias_calendario=365
         )
         
         if result["success"]:
             typer.echo(f"✅ {result['message']}")
             typer.echo(f"   ID de la propiedad: {result['property_id']}")
+            typer.echo(f"   Nombre: {result['property']['nombre']}")
+            typer.echo(f"   Capacidad: {result['property']['capacidad']} personas")
         else:
             typer.echo(f"❌ Error: {result['error']}")
     
@@ -632,7 +665,7 @@ def list_properties(
 
 @app.command()
 def get_property(
-    propiedad_id: int = typer.Argument(..., help="ID de la propiedad"),
+    propiedad_id: int = typer.Argument(...),
 ):
     """Obtiene los detalles de una propiedad."""
     from services.properties import PropertyService
@@ -657,11 +690,11 @@ def get_property(
 
 @app.command()
 def update_property(
-    propiedad_id: int = typer.Argument(..., help="ID de la propiedad"),
-    nombre: Optional[str] = typer.Option(None, "--nombre", "-n", help="Nuevo nombre"),
-    descripcion: Optional[str] = typer.Option(None, "--descripcion", "-d", help="Nueva descripción"),
-    capacidad: Optional[int] = typer.Option(None, "--capacidad", "-c", help="Nueva capacidad"),
-    tipo_propiedad_id: Optional[int] = typer.Option(None, "--tipo", "-t", help="Nuevo tipo de propiedad"),
+    propiedad_id: int = typer.Argument(...),
+    nombre: Optional[str] = typer.Option(None, "--nombre", "-n"),
+    descripcion: Optional[str] = typer.Option(None, "--descripcion", "-d"),
+    capacidad: Optional[int] = typer.Option(None, "--capacidad", "-c"),
+    tipo_propiedad_id: Optional[int] = typer.Option(None, "--tipo", "-t"),
 ):
     """Actualiza los datos de una propiedad."""
     from services.properties import PropertyService
@@ -690,8 +723,8 @@ def update_property(
 
 @app.command()
 def delete_property(
-    propiedad_id: int = typer.Argument(..., help="ID de la propiedad"),
-    confirm: bool = typer.Option(False, "--confirm", "-y", help="Confirmar eliminación sin preguntar"),
+    propiedad_id: int = typer.Argument(...),
+    confirm: bool = typer.Option(False, "--confirm", "-y"),
 ):
     """Elimina una propiedad y todas sus relaciones."""
     from services.properties import PropertyService

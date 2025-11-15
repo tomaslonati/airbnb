@@ -5,10 +5,15 @@ Comandos del CLI usando Typer.
 import typer
 import asyncio
 from datetime import date
-from typing import Optional
+from typing import Optional, List
 from services.search import SearchService
 from services.reservations import ReservationService
 from services.analytics import AnalyticsService
+from services.properties import PropertyService
+from services.setup import SetupService
+from services.auth import AuthService
+from services.user import UserService
+from services.mongo_host import MongoHostService
 from routes.registry import execute_route, get_available_routes
 from migrations.manager import migration_manager
 from utils.logging import get_logger, configure_logging
@@ -448,6 +453,718 @@ def admin(
             typer.echo("❌ Acción inválida. Usa 'clear-cache' o 'health'")
 
     asyncio.run(_admin())
+
+
+@app.command()
+def setup():
+    """Configura datos básicos del sistema (países, ciudades, amenities, etc.)."""
+
+    async def _setup():
+        setup_service = SetupService()
+
+        typer.echo("🛠️  Configurando datos básicos del sistema...")
+        typer.echo("=" * 60)
+
+        # Confirmación
+        confirm = typer.confirm(
+            "¿Desea proceder con la configuración inicial?")
+        if not confirm:
+            typer.echo("❌ Configuración cancelada")
+            return
+
+        try:
+            result = await setup_service.setup_all()
+
+            if result["success"]:
+                typer.echo("\n✅ Configuración completada exitosamente!")
+
+                if result["demo_user"]:
+                    demo = result["demo_user"]
+                    typer.echo("\n👤 Usuario demo creado:")
+                    typer.echo(f"   Email: {demo['email']}")
+                    typer.echo(f"   Password: {demo['password']}")
+                    typer.echo(f"   User ID: {demo['user_id']}")
+
+            else:
+                typer.echo("\n⚠️  Configuración completada con errores:")
+                for error in result["errors"]:
+                    typer.echo(f"   • {error}")
+
+        except Exception as e:
+            logger.error("Error en configuración", error=str(e))
+            typer.echo(f"❌ Error durante la configuración: {e}")
+            raise typer.Exit(1)
+
+    asyncio.run(_setup())
+
+
+@app.command()
+def property(
+    action: str = typer.Argument(...,
+                                 help="Acción: 'create', 'list', o 'stats'"),
+    name: Optional[str] = typer.Option(
+        None, "--name", "-n", help="Nombre de la propiedad"),
+    description: Optional[str] = typer.Option(
+        None, "--description", "-d", help="Descripción"),
+    capacity: Optional[int] = typer.Option(
+        None, "--capacity", "-c", help="Capacidad de huéspedes"),
+    city_id: Optional[int] = typer.Option(
+        None, "--city", help="ID de la ciudad"),
+    host_id: Optional[int] = typer.Option(
+        None, "--host", help="ID del anfitrión"),
+    type_id: Optional[int] = typer.Option(
+        None, "--type", help="ID del tipo de propiedad"),
+    interactive: bool = typer.Option(
+        False, "--interactive", "-i", help="Modo interactivo")
+):
+    """Gestiona propiedades del sistema."""
+
+    async def _property():
+        property_service = PropertyService()
+
+        if action == "create":
+            if interactive:
+                await _create_property_interactive(property_service)
+            else:
+                await _create_property_params(property_service, name, description, capacity, city_id, host_id, type_id)
+
+        elif action == "list":
+            await _list_properties(property_service)
+
+        elif action == "stats":
+            await _property_stats(property_service)
+
+        else:
+            typer.echo("❌ Acción inválida. Usa 'create', 'list', o 'stats'")
+            raise typer.Exit(1)
+
+    async def _create_property_interactive(service: PropertyService):
+        """Crear propiedad en modo interactivo."""
+        typer.echo("\n🏠 CREAR NUEVA PROPIEDAD")
+        typer.echo("=" * 50)
+
+        # Información básica
+        name = typer.prompt("Nombre de la propiedad")
+        description = typer.prompt("Descripción")
+        capacity = typer.prompt("Capacidad (huéspedes)", type=int)
+
+        # Seleccionar país y ciudad
+        countries = await service.get_countries()
+        if not countries:
+            typer.echo("❌ No hay países configurados. Ejecute 'setup' primero.")
+            return
+
+        typer.echo("\n🌍 Países disponibles:")
+        for i, country in enumerate(countries, 1):
+            typer.echo(f"  {i}. {country['nombre']}")
+
+        country_idx = typer.prompt("Seleccione país", type=int) - 1
+        if not (0 <= country_idx < len(countries)):
+            typer.echo("❌ Selección inválida")
+            return
+
+        selected_country = countries[country_idx]
+        cities = await service.get_cities_by_country(selected_country['id'])
+
+        if not cities:
+            typer.echo("❌ No hay ciudades para este país")
+            return
+
+        typer.echo(f"\n🏙️ Ciudades en {selected_country['nombre']}:")
+        for i, city in enumerate(cities, 1):
+            typer.echo(f"  {i}. {city['nombre']} ({city['cp']})")
+
+        city_idx = typer.prompt("Seleccione ciudad", type=int) - 1
+        if not (0 <= city_idx < len(cities)):
+            typer.echo("❌ Selección inválida")
+            return
+
+        selected_city = cities[city_idx]
+
+        # Seleccionar anfitrión
+        hosts = await service.get_hosts()
+        if not hosts:
+            typer.echo("❌ No hay anfitriones disponibles")
+            return
+
+        typer.echo("\n👤 Anfitriones disponibles:")
+        for i, host in enumerate(hosts, 1):
+            typer.echo(f"  {i}. {host['nombre']} ({host['email']})")
+
+        host_idx = typer.prompt("Seleccione anfitrión", type=int) - 1
+        if not (0 <= host_idx < len(hosts)):
+            typer.echo("❌ Selección inválida")
+            return
+
+        selected_host = hosts[host_idx]
+
+        # Seleccionar tipo de propiedad
+        types = await service.get_property_types()
+        if not types:
+            typer.echo("❌ No hay tipos de propiedad configurados")
+            return
+
+        typer.echo("\n🏠 Tipos de propiedad:")
+        for i, prop_type in enumerate(types, 1):
+            typer.echo(f"  {i}. {prop_type['nombre']}")
+
+        type_idx = typer.prompt("Seleccione tipo", type=int) - 1
+        if not (0 <= type_idx < len(types)):
+            typer.echo("❌ Selección inválida")
+            return
+
+        selected_type = types[type_idx]
+
+        # Crear propiedad
+        property_data = {
+            'nombre': name,
+            'descripcion': description,
+            'capacidad': capacity,
+            'ciudad_id': selected_city['id'],
+            'anfitrion_id': selected_host['id'],
+            'tipo_propiedad_id': selected_type['id']
+        }
+
+        try:
+            property_id = await service.create_property(property_data)
+            typer.echo(f"\n✅ Propiedad creada con ID: {property_id}")
+
+            # Mostrar resumen
+            summary = await service.get_property_summary(property_id)
+            typer.echo("\n📋 Resumen:")
+            typer.echo(f"   Nombre: {summary['nombre']}")
+            typer.echo(f"   Ubicación: {summary['ciudad']}, {summary['pais']}")
+            typer.echo(f"   Anfitrión: {summary['anfitrion']}")
+            typer.echo(f"   Tipo: {summary['tipo_propiedad']}")
+
+        except Exception as e:
+            typer.echo(f"❌ Error creando propiedad: {e}")
+            raise typer.Exit(1)
+
+    async def _create_property_params(service: PropertyService, name, description, capacity, city_id, host_id, type_id):
+        """Crear propiedad usando parámetros."""
+        if not all([name, description, capacity, city_id, host_id, type_id]):
+            typer.echo(
+                "❌ Faltan parámetros requeridos. Use --interactive o proporcione todos los parámetros.")
+            return
+
+        property_data = {
+            'nombre': name,
+            'descripcion': description,
+            'capacidad': capacity,
+            'ciudad_id': city_id,
+            'anfitrion_id': host_id,
+            'tipo_propiedad_id': type_id
+        }
+
+        try:
+            property_id = await service.create_property(property_data)
+            typer.echo(f"✅ Propiedad creada con ID: {property_id}")
+        except Exception as e:
+            typer.echo(f"❌ Error creando propiedad: {e}")
+            raise typer.Exit(1)
+
+    async def _list_properties(service: PropertyService):
+        """Listar propiedades."""
+        typer.echo("🏠 Esta funcionalidad estará disponible próximamente")
+        typer.echo("💡 Por ahora use 'property stats' para ver estadísticas")
+
+    async def _property_stats(service: PropertyService):
+        """Mostrar estadísticas de propiedades."""
+        try:
+            stats = await service.get_property_statistics()
+
+            typer.echo("\n📊 ESTADÍSTICAS DE PROPIEDADES")
+            typer.echo("=" * 50)
+            typer.echo(f"Total de propiedades: {stats['total_properties']}")
+
+            if stats['by_type']:
+                typer.echo("\n🏠 Por tipo de propiedad:")
+                for prop_type in stats['by_type']:
+                    typer.echo(
+                        f"   {prop_type['nombre']}: {prop_type['cantidad']}")
+
+            if stats['by_city']:
+                typer.echo("\n🌍 Por ciudad:")
+                for city in stats['by_city']:
+                    typer.echo(
+                        f"   {city['ciudad']}, {city['pais']}: {city['cantidad']}")
+
+        except Exception as e:
+            typer.echo(f"❌ Error obteniendo estadísticas: {e}")
+            raise typer.Exit(1)
+
+    asyncio.run(_property())
+
+
+@app.command()
+def auth(
+    action: str = typer.Argument(
+        ..., help="Acción: 'login', 'register', 'logout', 'profile', o 'status'"),
+    email: Optional[str] = typer.Option(
+        None, "--email", "-e", help="Email del usuario"),
+    password: Optional[str] = typer.Option(
+        None, "--password", "-p", help="Contraseña"),
+    rol: Optional[str] = typer.Option(
+        None, "--role", "-r", help="Rol: HUESPED, ANFITRION o AMBOS"),
+    nombre: Optional[str] = typer.Option(
+        None, "--name", "-n", help="Nombre del usuario"),
+    interactive: bool = typer.Option(
+        False, "--interactive", "-i", help="Modo interactivo")
+):
+    """Gestiona autenticación y perfiles de usuario."""
+
+    async def _auth():
+        auth_service = AuthService()
+        user_service = UserService()
+
+        try:
+            if action == "register":
+                # Inicializar variables
+                _email = email
+                _password = password
+                _rol = rol
+                _nombre = nombre
+
+                if interactive or not all([_email, _password, _rol]):
+                    # Modo interactivo
+                    typer.echo("📝 REGISTRO DE NUEVO USUARIO")
+                    typer.echo("=" * 50)
+
+                    if not _email:
+                        _email = typer.prompt("📧 Email")
+                    if not _password:
+                        _password = typer.prompt(
+                            "🔐 Contraseña", hide_input=True)
+                    if not _rol:
+                        typer.echo("\n🎭 Roles disponibles:")
+                        typer.echo("1. HUESPED - Solo reservar propiedades")
+                        typer.echo("2. ANFITRION - Solo publicar propiedades")
+                        typer.echo("3. AMBOS - Reservar y publicar")
+
+                        rol_choice = typer.prompt(
+                            "Seleccionar rol (1-3)", type=int)
+                        rol_map = {1: "HUESPED", 2: "ANFITRION", 3: "AMBOS"}
+                        _rol = rol_map.get(rol_choice, "HUESPED")
+
+                    if not _nombre:
+                        _nombre = typer.prompt(
+                            "👤 Nombre completo", default=_email.split('@')[0])
+
+                # Registrar usuario
+                result = await auth_service.register(_email, _password, _rol, _nombre)
+                typer.echo(result.message)
+
+                if result.success and result.user_profile:
+                    typer.echo(f"✅ Bienvenido/a {result.user_profile.nombre}!")
+                    typer.echo(f"🎭 Rol: {result.user_profile.rol}")
+                else:
+                    raise typer.Exit(1)
+
+            elif action == "login":
+                # Inicializar variables
+                _email = email
+                _password = password
+
+                if interactive or not all([_email, _password]):
+                    # Modo interactivo
+                    typer.echo("🔐 INICIO DE SESIÓN")
+                    typer.echo("=" * 30)
+
+                    if not _email:
+                        _email = typer.prompt("📧 Email")
+                    if not _password:
+                        _password = typer.prompt(
+                            "🔐 Contraseña", hide_input=True)
+
+                # Iniciar sesión
+                result = await auth_service.login(_email, _password)
+                typer.echo(result.message)
+
+                if result.success and result.user_profile:
+                    typer.echo(f"🎭 Rol: {result.user_profile.rol}")
+
+                    # Mostrar estadísticas básicas
+                    stats = await user_service.get_user_stats(result.user_profile)
+
+                    if stats.huesped_stats:
+                        typer.echo(
+                            f"🏠 Reservas totales: {stats.huesped_stats.get('total_reservas', 0)}")
+
+                    if stats.anfitrion_stats:
+                        typer.echo(
+                            f"🏡 Propiedades: {stats.anfitrion_stats.get('total_propiedades', 0)}")
+                else:
+                    raise typer.Exit(1)
+
+            elif action == "logout":
+                result = await auth_service.logout()
+                typer.echo(result.message)
+
+            elif action == "profile":
+                user_profile = auth_service.get_current_user()
+
+                if not user_profile:
+                    typer.echo(
+                        "❌ No hay sesión activa. Usa 'auth login' primero.")
+                    raise typer.Exit(1)
+
+                # Mostrar perfil completo
+                typer.echo("👤 PERFIL DE USUARIO")
+                typer.echo("=" * 40)
+                typer.echo(f"📧 Email: {user_profile.email}")
+                typer.echo(f"🎭 Rol: {user_profile.rol}")
+                typer.echo(
+                    f"📅 Registrado: {user_profile.creado_en.strftime('%d/%m/%Y')}")
+
+                # Datos específicos por rol
+                if user_profile.rol in ['HUESPED', 'AMBOS']:
+                    huesped_profile = await user_service.get_huesped_profile(user_profile)
+                    if huesped_profile:
+                        typer.echo(f"\n🏠 DATOS DE HUÉSPED:")
+                        typer.echo(f"   👤 Nombre: {huesped_profile.nombre}")
+                        typer.echo(
+                            f"   📞 Teléfono: {huesped_profile.telefono or 'No especificado'}")
+                        typer.echo(
+                            f"   🎫 Reservas totales: {huesped_profile.total_reservas}")
+                        typer.echo(
+                            f"   ✅ Reservas activas: {huesped_profile.reservas_activas}")
+
+                if user_profile.rol in ['ANFITRION', 'AMBOS']:
+                    anfitrion_profile = await user_service.get_anfitrion_profile(user_profile)
+                    if anfitrion_profile:
+                        typer.echo(f"\n🏡 DATOS DE ANFITRIÓN:")
+                        typer.echo(f"   👤 Nombre: {anfitrion_profile.nombre}")
+                        typer.echo(
+                            f"   🏠 Propiedades: {anfitrion_profile.total_propiedades}")
+                        typer.echo(
+                            f"   ✅ Reservas completadas: {anfitrion_profile.cant_rvas_completadas}")
+
+            elif action == "status":
+                user_profile = auth_service.get_current_user()
+
+                if user_profile:
+                    typer.echo(
+                        f"✅ Sesión activa: {user_profile.email} ({user_profile.rol})")
+                else:
+                    typer.echo("❌ No hay sesión activa")
+
+            else:
+                typer.echo(f"❌ Acción inválida: {action}")
+                typer.echo(
+                    "Acciones válidas: login, register, logout, profile, status")
+                raise typer.Exit(1)
+
+        except Exception as e:
+            typer.echo(f"❌ Error en autenticación: {str(e)}")
+            raise typer.Exit(1)
+
+    asyncio.run(_auth())
+
+
+@app.command()
+def user(
+    action: str = typer.Argument(
+        ..., help="Acción: 'stats', 'reservations', 'properties', o 'update'"),
+    limit: int = typer.Option(
+        10, "--limit", "-l", help="Límite de resultados"),
+    interactive: bool = typer.Option(
+        False, "--interactive", "-i", help="Modo interactivo")
+):
+    """Gestiona datos y operaciones específicas del usuario."""
+
+    async def _user():
+        auth_service = AuthService()
+        user_service = UserService()
+
+        try:
+            # Verificar autenticación
+            user_profile = auth_service.get_current_user()
+            if not user_profile:
+                typer.echo("❌ No hay sesión activa. Usa 'auth login' primero.")
+                raise typer.Exit(1)
+
+            if action == "stats":
+                # Estadísticas completas del usuario
+                stats = await user_service.get_user_stats(user_profile)
+
+                typer.echo("📊 ESTADÍSTICAS DEL USUARIO")
+                typer.echo("=" * 40)
+                typer.echo(
+                    f"👤 Usuario: {user_profile.nombre or user_profile.email}")
+                typer.echo(f"🎭 Rol: {user_profile.rol}")
+
+                if stats.huesped_stats:
+                    h_stats = stats.huesped_stats
+                    typer.echo(f"\n🏠 COMO HUÉSPED:")
+                    typer.echo(
+                        f"   📋 Total reservas: {h_stats.get('total_reservas', 0)}")
+                    typer.echo(
+                        f"   ✅ Completadas: {h_stats.get('reservas_completadas', 0)}")
+                    typer.echo(
+                        f"   🔄 Activas: {h_stats.get('reservas_activas', 0)}")
+                    typer.echo(
+                        f"   ❌ Canceladas: {h_stats.get('reservas_canceladas', 0)}")
+                    typer.echo(
+                        f"   💰 Gasto total: ${h_stats.get('gasto_total', 0)}")
+
+                if stats.anfitrion_stats:
+                    a_stats = stats.anfitrion_stats
+                    typer.echo(f"\n🏡 COMO ANFITRIÓN:")
+                    typer.echo(
+                        f"   🏠 Total propiedades: {a_stats.get('total_propiedades', 0)}")
+                    typer.echo(
+                        f"   📋 Reservas recibidas: {a_stats.get('total_reservas_recibidas', 0)}")
+                    typer.echo(
+                        f"   ✅ Reservas completadas: {a_stats.get('cant_rvas_completadas', 0)}")
+                    typer.echo(
+                        f"   💰 Ingresos totales: ${a_stats.get('ingresos_totales', 0)}")
+                    typer.echo(
+                        f"   ⭐ Puntaje promedio: {a_stats.get('puntaje_promedio', 0):.1f}/5")
+
+            elif action == "reservations":
+                # Mostrar reservas del huésped
+                if not user_profile.huesped_id:
+                    typer.echo("❌ Usuario no tiene perfil de huésped")
+                    raise typer.Exit(1)
+
+                reservas = await user_service.get_user_reservations(user_profile.huesped_id, limit)
+
+                if not reservas:
+                    typer.echo("📋 No tienes reservas registradas")
+                    return
+
+                typer.echo(f"📋 TUS RESERVAS (últimas {len(reservas)})")
+                typer.echo("=" * 50)
+
+                for reserva in reservas:
+                    typer.echo(f"🏠 {reserva['propiedad_nombre']}")
+                    typer.echo(f"   📍 {reserva['ciudad']}, {reserva['pais']}")
+                    typer.echo(
+                        f"   📅 {reserva['fecha_check_in']} - {reserva['fecha_check_out']}")
+                    typer.echo(f"   💰 ${reserva['monto_final']}")
+                    typer.echo(f"   📊 Estado: {reserva['estado']}")
+                    typer.echo(
+                        f"   👤 Anfitrión: {reserva['anfitrion_nombre']}")
+                    typer.echo("")
+
+            elif action == "properties":
+                # Mostrar propiedades del anfitrión
+                if not user_profile.anfitrion_id:
+                    typer.echo("❌ Usuario no tiene perfil de anfitrión")
+                    raise typer.Exit(1)
+
+                propiedades = await user_service.get_anfitrion_properties(user_profile.anfitrion_id)
+
+                if not propiedades:
+                    typer.echo("🏠 No tienes propiedades registradas")
+                    return
+
+                typer.echo(f"🏡 TUS PROPIEDADES ({len(propiedades)})")
+                typer.echo("=" * 40)
+
+                for prop in propiedades:
+                    typer.echo(f"🏠 {prop['nombre']}")
+                    typer.echo(f"   📍 {prop['ciudad']}, {prop['pais']}")
+                    typer.echo(f"   🏠 Tipo: {prop['tipo_propiedad']}")
+                    typer.echo(f"   👥 Capacidad: {prop['capacidad']} personas")
+                    typer.echo(
+                        f"   📋 Reservas totales: {prop['total_reservas']}")
+                    if prop['descripcion']:
+                        typer.echo(f"   📝 {prop['descripcion'][:60]}...")
+                    typer.echo("")
+
+            else:
+                typer.echo(f"❌ Acción inválida: {action}")
+                typer.echo(
+                    "Acciones válidas: stats, reservations, properties, update")
+                raise typer.Exit(1)
+
+        except Exception as e:
+            typer.echo(f"❌ Error gestionando usuario: {str(e)}")
+            raise typer.Exit(1)
+
+    asyncio.run(_user())
+
+
+@app.command()
+def mongo(
+    action: str = typer.Argument(...,
+                                 help="Acción: 'hosts', 'ratings', 'stats', o 'verify'"),
+    host_id: Optional[int] = typer.Option(
+        None, "--host", "-h", help="ID del anfitrión"),
+    guest_id: Optional[int] = typer.Option(
+        None, "--guest", "-g", help="ID del huésped (para ratings)"),
+    rating: Optional[float] = typer.Option(
+        None, "--rating", "-r", help="Calificación (1-5)"),
+    comment: Optional[str] = typer.Option(
+        None, "--comment", "-c", help="Comentario de la calificación"),
+    limit: int = typer.Option(10, "--limit", "-l", help="Límite de resultados")
+):
+    """Gestiona documentos y datos de MongoDB (anfitriones y calificaciones)."""
+
+    async def _mongo():
+        mongo_service = MongoHostService()
+
+        try:
+            if action == "verify":
+                # Verificar conexión MongoDB
+                typer.echo("🔍 Verificando conexión MongoDB...")
+                result = await mongo_service.verify_connection()
+
+                if result.get('success'):
+                    typer.echo("✅ MongoDB conectado correctamente")
+                else:
+                    typer.echo(f"❌ Error MongoDB: {result.get('error')}")
+                    raise typer.Exit(1)
+
+            elif action == "hosts":
+                # Listar todos los anfitriones en MongoDB
+                typer.echo("🏠 DOCUMENTOS DE ANFITRIONES EN MONGODB")
+                typer.echo("=" * 50)
+
+                result = await mongo_service.get_all_hosts()
+
+                if result.get('success'):
+                    hosts = result['hosts']
+
+                    if not hosts:
+                        typer.echo(
+                            "📝 No hay documentos de anfitriones en MongoDB")
+                        return
+
+                    typer.echo(f"Total de anfitriones: {len(hosts)}")
+                    typer.echo()
+
+                    for host in hosts:
+                        host_id = host['host_id']
+                        ratings_count = len(host.get('ratings', []))
+                        stats = host.get('stats', {})
+                        avg_rating = stats.get('average_rating', 0.0)
+                        total_reviews = stats.get('total_reviews', 0)
+
+                        typer.echo(f"🏠 Host ID: {host_id}")
+                        typer.echo(
+                            f"   ⭐ {ratings_count} calificaciones (promedio: {avg_rating:.1f})")
+                        typer.echo(
+                            f"   📝 {total_reviews} reviews con comentarios")
+
+                        if 'created_at' in host:
+                            typer.echo(f"   📅 Creado: {host['created_at']}")
+                        typer.echo()
+                else:
+                    typer.echo(f"❌ Error: {result.get('error')}")
+                    raise typer.Exit(1)
+
+            elif action == "ratings":
+                if not host_id:
+                    typer.echo("❌ Especifica --host para ver calificaciones")
+                    raise typer.Exit(1)
+
+                # Si se proporcionan datos para crear rating
+                if guest_id and rating:
+                    typer.echo(
+                        f"📝 Agregando calificación al host {host_id}...")
+
+                    rating_data = {
+                        "guest_id": guest_id,
+                        "rating": rating,
+                        "comment": comment or "",
+                        "reservation_id": 999  # Placeholder - en producción vendría de la reserva
+                    }
+
+                    result = await mongo_service.add_rating(host_id, rating_data)
+
+                    if result.get('success'):
+                        typer.echo("✅ Calificación agregada exitosamente")
+                    else:
+                        typer.echo(f"❌ Error: {result.get('error')}")
+                        raise typer.Exit(1)
+
+                # Mostrar calificaciones del host
+                typer.echo(f"⭐ CALIFICACIONES DEL HOST {host_id}")
+                typer.echo("=" * 40)
+
+                result = await mongo_service.get_host_ratings(host_id, limit)
+
+                if result.get('success'):
+                    ratings = result['ratings']
+
+                    if not ratings:
+                        typer.echo("📝 Este anfitrión no tiene calificaciones")
+                        return
+
+                    typer.echo(
+                        f"Mostrando últimas {min(len(ratings), limit)} calificaciones:")
+                    typer.echo()
+
+                    for i, rating_data in enumerate(ratings, 1):
+                        rating_val = rating_data.get('rating', 0)
+                        guest = rating_data.get('guest_id', 'N/A')
+                        comment = rating_data.get('comment', '')
+
+                        stars = "⭐" * int(rating_val)
+                        typer.echo(
+                            f"{i}. {stars} ({rating_val}/5) - Huésped {guest}")
+                        if comment:
+                            typer.echo(f"   💬 \"{comment}\"")
+                        typer.echo()
+                else:
+                    typer.echo(f"❌ Error: {result.get('error')}")
+                    raise typer.Exit(1)
+
+            elif action == "stats":
+                if not host_id:
+                    typer.echo("❌ Especifica --host para ver estadísticas")
+                    raise typer.Exit(1)
+
+                typer.echo(f"📊 ESTADÍSTICAS DEL HOST {host_id}")
+                typer.echo("=" * 40)
+
+                result = await mongo_service.get_host_stats(host_id)
+
+                if result.get('success'):
+                    stats = result['stats']
+
+                    typer.echo(
+                        f"Total calificaciones: {stats.get('total_ratings', 0)}")
+                    typer.echo(
+                        f"Promedio: {stats.get('average_rating', 0.0):.2f}/5")
+                    typer.echo(
+                        f"Reviews con comentarios: {stats.get('total_reviews', 0)}")
+
+                    # Mostrar documento completo
+                    doc_result = await mongo_service.get_host_document(host_id)
+                    if doc_result.get('success'):
+                        doc = doc_result['document']
+                        if 'updated_at' in doc:
+                            typer.echo(
+                                f"Última actualización: {doc['updated_at']}")
+                else:
+                    typer.echo(f"❌ Error: {result.get('error')}")
+                    raise typer.Exit(1)
+
+            else:
+                typer.echo("❌ Acción inválida.")
+                typer.echo("Acciones válidas: hosts, ratings, stats, verify")
+                typer.echo("\nEjemplos:")
+                typer.echo(
+                    "  mongo verify                    # Verificar conexión")
+                typer.echo(
+                    "  mongo hosts                     # Listar todos los anfitriones")
+                typer.echo(
+                    "  mongo ratings --host 1          # Ver calificaciones del host 1")
+                typer.echo(
+                    "  mongo ratings --host 1 --guest 5 --rating 4.5 --comment 'Excelente'")
+                typer.echo(
+                    "  mongo stats --host 1            # Estadísticas del host 1")
+                raise typer.Exit(1)
+
+        except Exception as e:
+            typer.echo(f"❌ Error en MongoDB: {str(e)}")
+            raise typer.Exit(1)
+
+    asyncio.run(_mongo())
 
 
 if __name__ == "__main__":

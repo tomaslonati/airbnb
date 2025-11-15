@@ -22,14 +22,23 @@ async def get_client():
     if _neo4j_driver is None:
         logger.info("Creando driver Neo4j")
 
-        _neo4j_driver = GraphDatabase.driver(
-            db_config.neo4j_uri,
-            auth=(db_config.neo4j_user, db_config.neo4j_password)
-        )
+        try:
+            _neo4j_driver = GraphDatabase.driver(
+                db_config.neo4j_uri,
+                auth=(db_config.neo4j_user, db_config.neo4j_password),
+                max_connection_lifetime=30,
+                max_connection_pool_size=10,
+                connection_timeout=10
+            )
 
-        # Verificar conectividad
-        _neo4j_driver.verify_connectivity()
-        logger.info("Driver Neo4j creado exitosamente")
+            # Test básico en lugar de verify_connectivity
+            result = _neo4j_driver.execute_query("RETURN 1 as test")
+            logger.info("Driver Neo4j creado exitosamente")
+
+        except Exception as e:
+            logger.error(f"Error creando driver Neo4j: {e}")
+            _neo4j_driver = None
+            raise
 
     return _neo4j_driver
 
@@ -42,6 +51,26 @@ async def close_client():
         _neo4j_driver.close()
         _neo4j_driver = None
         logger.info("Driver Neo4j cerrado")
+
+
+def is_available():
+    """Verifica si Neo4j está disponible."""
+    try:
+        from config import db_config
+        driver = GraphDatabase.driver(
+            db_config.neo4j_uri,
+            auth=(db_config.neo4j_user, db_config.neo4j_password),
+            connection_timeout=5
+        )
+
+        # Test rápido
+        driver.execute_query("RETURN 1 as test")
+        driver.close()
+        return True
+
+    except Exception as e:
+        logger.warning(f"Neo4j no disponible: {e}")
+        return False
 
 
 def execute_query(query: str, parameters: dict = None, database: str = "neo4j"):
@@ -98,32 +127,89 @@ def create_relationship(from_node: dict, to_node: dict, relationship: str, prope
     except Exception as e:
         logger.error(f"Error creando relación: {e}")
         raise
-    """Ejecuta una consulta Cypher."""
-    driver = await get_client()
-
-    async with driver.session() as session:
-        result = await session.run(query, parameters or {})
-        records = await result.data()
-        return records
 
 
-async def execute_write_transaction(query: str, parameters: dict = None):
-    """Ejecuta una transacción de escritura."""
-    driver = await get_client()
+def create_node(label: str, properties: dict):
+    """Crea un nodo en Neo4j."""
+    try:
+        driver = _neo4j_driver
+        if not driver:
+            logger.error("Driver Neo4j no inicializado")
+            return None
 
-    async with driver.session() as session:
-        result = await session.execute_write(
-            lambda tx: tx.run(query, parameters or {})
-        )
+        props = ", ".join([f"{k}: ${k}" for k in properties.keys()])
+        query = f"CREATE (n:{label} {{{props}}}) RETURN n"
+
+        result = driver.execute_query(
+            query, parameters=properties, database_="neo4j")
+        logger.info(f"Nodo {label} creado exitosamente")
         return result
 
+    except Exception as e:
+        logger.error(f"Error creando nodo: {e}")
+        raise
 
-async def execute_read_transaction(query: str, parameters: dict = None):
-    """Ejecuta una transacción de lectura."""
-    driver = await get_client()
 
-    async with driver.session() as session:
-        result = await session.execute_read(
-            lambda tx: tx.run(query, parameters or {}).data()
+def find_nodes(label: str, properties: dict = None):
+    """Busca nodos en Neo4j."""
+    try:
+        driver = _neo4j_driver
+        if not driver:
+            logger.error("Driver Neo4j no inicializado")
+            return None
+
+        if properties:
+            where_clause = " AND ".join(
+                [f"n.{k} = ${k}" for k in properties.keys()])
+            query = f"MATCH (n:{label}) WHERE {where_clause} RETURN n"
+            params = properties
+        else:
+            query = f"MATCH (n:{label}) RETURN n"
+            params = {}
+
+        result = driver.execute_query(
+            query, parameters=params, database_="neo4j")
+        return result[0]  # records
+
+    except Exception as e:
+        logger.error(f"Error buscando nodos: {e}")
+        raise
+
+
+def get_recommendations(user_id: str, limit: int = 5):
+    """Obtiene recomendaciones basadas en el grafo."""
+    try:
+        driver = _neo4j_driver
+        if not driver:
+            logger.error("Driver Neo4j no inicializado")
+            return []
+
+        # Consulta de recomendación: personas que conocen a personas que conozco
+        query = """
+        MATCH (user:Person {id: $user_id})-[:KNOWS]->(friend:Person)-[:KNOWS]->(recommendation:Person)
+        WHERE recommendation.id <> $user_id
+        AND NOT (user)-[:KNOWS]->(recommendation)
+        RETURN recommendation, count(*) as score
+        ORDER BY score DESC
+        LIMIT $limit
+        """
+
+        records, summary, keys = driver.execute_query(
+            query,
+            parameters={"user_id": user_id, "limit": limit},
+            database_="neo4j"
         )
-        return result
+
+        recommendations = []
+        for record in records:
+            rec_data = record.data()
+            recommendations.append({
+                "person": dict(rec_data["recommendation"]),
+                "score": rec_data["score"]
+            })
+
+        return recommendations
+
+    except Exception as e:
+        logger.error(f"Error obteniendo recomendaciones: {e}")
+        raise

@@ -563,5 +563,97 @@ def users_cmd(
     asyncio.run(_users())
 
 
+# ============ COMANDOS DE PROPIEDADES ============
+
+@app.command()
+def create_property(
+    nombre: str = typer.Argument(..., help="Nombre de la propiedad"),
+    descripcion: str = typer.Argument(..., help="Descripción de la propiedad"),
+    capacidad: int = typer.Argument(..., help="Capacidad de personas"),
+    ciudad_id: int = typer.Option(..., "--ciudad-id", "-c", help="ID de la ciudad"),
+    anfitrion_id: int = typer.Option(..., "--anfitrion-id", "-a", help="ID del anfitrión"),
+    tipo_propiedad_id: int = typer.Option(..., "--tipo-id", "-t", help="ID del tipo de propiedad"),
+):
+    """Crea una nueva propiedad."""
+    from services.properties import PropertyService
+    
+    async def _create():
+        service = PropertyService()
+        result = await service.create_property(
+            nombre=nombre,
+            descripcion=descripcion,
+            capacidad=capacidad,
+            ciudad_id=ciudad_id,
+            anfitrion_id=anfitrion_id,
+            tipo_propiedad_id=tipo_propiedad_id
+        )
+        
+        if result["success"]:
+            typer.echo(f"✅ {result['message']}")
+            typer.echo(f"   ID de la propiedad: {result['property_id']}")
+        else:
+            typer.echo(f"❌ Error: {result['error']}")
+    
+    asyncio.run(_create())
+
+
+@app.command()
+def list_properties(
+    ciudad_id: Optional[int] = typer.Option(None, "--ciudad-id", "-c", help="Filtrar por ciudad"),
+    anfitrion_id: Optional[int] = typer.Option(None, "--anfitrion-id", "-a", help="Filtrar por anfitrión"),
+):
+    """Lista propiedades disponibles."""
+    from services.properties import PropertyService
+    
+    async def _list():
+        service = PropertyService()
+        
+        if ciudad_id:
+            result = await service.list_properties_by_city(ciudad_id)
+        elif anfitrion_id:
+            result = await service.list_properties_by_host(anfitrion_id)
+        else:
+            typer.echo("❌ Debes especificar --ciudad-id o --anfitrion-id")
+            return
+        
+        if result["success"]:
+            typer.echo(f"📍 Total de propiedades: {result['total']}")
+            for prop in result["properties"]:
+                typer.echo(f"\n  🏠 {prop['nombre']}")
+                typer.echo(f"     ID: {prop['id']}")
+                typer.echo(f"     Capacidad: {prop['capacidad']} personas")
+                typer.echo(f"     Ciudad: {prop.get('ciudad', 'N/A')}")
+                typer.echo(f"     Tipo: {prop.get('tipo_propiedad', 'N/A')}")
+        else:
+            typer.echo(f"❌ Error: {result['error']}")
+    
+    asyncio.run(_list())
+
+
+@app.command()
+def get_property(
+    propiedad_id: int = typer.Argument(..., help="ID de la propiedad"),
+):
+    """Obtiene los detalles de una propiedad."""
+    from services.properties import PropertyService
+    
+    async def _get():
+        service = PropertyService()
+        result = await service.get_property(propiedad_id)
+        
+        if result["success"]:
+            prop = result["property"]
+            typer.echo(f"🏠 {prop['nombre']}")
+            typer.echo(f"   ID: {prop['id']}")
+            typer.echo(f"   Descripción: {prop.get('descripcion', 'N/A')}")
+            typer.echo(f"   Capacidad: {prop['capacidad']} personas")
+            typer.echo(f"   Ciudad: {prop.get('ciudad', 'N/A')}")
+            typer.echo(f"   Tipo: {prop.get('tipo_propiedad', 'N/A')}")
+        else:
+            typer.echo(f"❌ Error: {result['error']}")
+    
+    asyncio.run(_get())
+
+
 if __name__ == "__main__":
     app()

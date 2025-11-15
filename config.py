@@ -5,6 +5,7 @@ Configuración de bases de datos para el proyecto Airbnb.
 import os
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
+from pydantic import ConfigDict
 
 # Cargar variables de entorno
 load_dotenv()
@@ -12,6 +13,8 @@ load_dotenv()
 
 class DatabaseConfig(BaseSettings):
     """Configuración de todas las bases de datos."""
+    
+    model_config = ConfigDict(extra='ignore')
 
     # AstraDB/Cassandra
     astra_db_token: str = os.getenv("ASTRA_DB_TOKEN", "")

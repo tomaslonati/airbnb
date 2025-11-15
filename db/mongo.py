@@ -14,30 +14,39 @@ logger = get_logger(__name__)
 _mongo_client: Optional[MongoClient] = None
 
 
-@retry_on_connection_error()
 def get_client() -> MongoClient:
     """Obtiene el cliente de MongoDB."""
     global _mongo_client
 
     if _mongo_client is None:
         logger.info("Creando cliente MongoDB")
-        logger.info(f"Conectando a: {db_config.mongo_connection_string.split('@')[1].split('?')[0]}")
+        
+        # Log seguro: solo mostrar host si la cadena de conexión existe
+        if db_config.mongo_connection_string:
+            try:
+                host_info = db_config.mongo_connection_string.split('@')[1].split('?')[0]
+                logger.info(f"Conectando a: {host_info}")
+            except (IndexError, AttributeError):
+                logger.info("Conectando a MongoDB")
+        else:
+            logger.warning("MONGO_CONNECTION_STRING no configurado")
 
-        _mongo_client = MongoClient(
-            db_config.mongo_connection_string,
-            maxPoolSize=20,
-            minPoolSize=5,
-            maxIdleTimeMS=30000,
-            serverSelectionTimeoutMS=5000
-        )
-
-        # Verificar conexión
         try:
+            _mongo_client = MongoClient(
+                db_config.mongo_connection_string,
+                maxPoolSize=20,
+                minPoolSize=5,
+                maxIdleTimeMS=30000,
+                serverSelectionTimeoutMS=5000
+            )
+
+            # Verificar conexión
             _mongo_client.admin.command('ping')
             logger.info("Pinged your deployment. You successfully connected to MongoDB!")
         except Exception as e:
             logger.error(f"Error al conectar a MongoDB: {e}")
-            raise
+            # No relanzar el error para permitir que la app inicie sin MongoDB
+            _mongo_client = None
 
     return _mongo_client
 

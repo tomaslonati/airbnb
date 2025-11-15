@@ -41,11 +41,15 @@ class DatabaseConfig(BaseSettings):
     postgres_password: str = os.getenv("POSTGRES_PASSWORD", "password")
     postgres_database: str = os.getenv("POSTGRES_DATABASE", "airbnb")
 
+    # Logging
+    log_level: str = os.getenv("LOG_LEVEL", "INFO")
+
 
 # Instancia global de configuración
 db_config = DatabaseConfig()
 
 # Para compatibilidad con importaciones existentes
+app_config = db_config  # Alias para compatibilidad
 neo4j_uri = db_config.neo4j_uri
 neo4j_user = db_config.neo4j_user
 neo4j_password = db_config.neo4j_password

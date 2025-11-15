@@ -30,7 +30,8 @@ async def get_client() -> asyncpg.Pool:
             password=db_config.postgres_password,
             min_size=5,
             max_size=20,
-            command_timeout=30
+            command_timeout=30,
+            statement_cache_size=0  # Desabilitar prepared statements para PgBouncer
         )
 
         logger.info("Pool PostgreSQL creado exitosamente")

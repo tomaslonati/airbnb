@@ -186,3 +186,30 @@ class Migration004CreateRecommendationGraph(BaseMigration):
             await neo4j.execute_write_transaction(query)
 
         logger.info("Estructura de recomendaciones eliminada")
+
+class Migration005CreateRecurrentBookings(BaseMigration):
+    """
+    Crea el índice para optimizar la consulta de usuarios que regresan.
+    Se basa en la relación User-[:BOOKED_IN]->City, que tendrá una propiedad 'count'.
+    """
+
+    def __init__(self):
+        super().__init__("005", "Crear índice de conteo para usuarios recurrentes")
+
+    async def up(self):
+        """Crear el índice de conteo de reservas (r.count)."""
+        
+        # El índice se crea sobre la propiedad 'count' de la relación BOOKED_IN,
+        # lo que permite consultas rápidas como WHERE r.count >= 2.
+        query = """
+            CREATE INDEX booked_in_count_idx IF NOT EXISTS 
+            FOR ()-[r:BOOKED_IN]-() ON (r.count)
+        """
+        
+        await neo4j.execute_write_transaction(query)
+        logger.info("Índice 'booked_in_count_idx' creado.")
+
+    async def down(self):
+        """Eliminar índice."""
+        await neo4j.execute_write_transaction("DROP INDEX booked_in_count_idx IF EXISTS")
+        logger.info("Índice de conteo de reservas eliminado.")

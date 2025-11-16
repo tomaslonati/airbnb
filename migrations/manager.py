@@ -7,7 +7,8 @@ from typing import List, Dict, Any
 from migrations.base import MigrationManager
 from migrations.postgres_migrations import (
     Migration001CreateUsers, Migration002CreateProperties,
-    Migration003CreateReservations, Migration004CreateReviews
+    Migration003CreateReservations, Migration004CreateReviews,
+    Migration005AddPriceToAvailability
 )
 from migrations.cassandra_migrations import (
     Migration001CreateReservationEvents, Migration002CreateUserActivity,
@@ -45,7 +46,8 @@ class DatabaseMigrationManager:
             Migration001CreateUsers(),
             Migration002CreateProperties(),
             Migration003CreateReservations(),
-            Migration004CreateReviews()
+            Migration004CreateReviews(),
+            Migration005AddPriceToAvailability()
         ]
 
         for migration in postgres_migrations:

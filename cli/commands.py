@@ -5,9 +5,11 @@ Comandos del CLI usando Typer - Versión Interactiva.
 import typer
 import asyncio
 from typing import Optional
+from datetime import datetime, date
 from services.auth import AuthService
 from services.user import UserService
 from services.mongo_host import MongoHostService
+from services.reservations import ReservationService
 from utils.logging import get_logger, configure_logging
 
 # Importar módulos CLI de features
@@ -27,7 +29,8 @@ app = typer.Typer(
 # Integrar sub-apps de features
 app.add_typer(auth_app, name="auth", help="Comandos de autenticación")
 app.add_typer(properties_app, name="properties", help="Gestión de propiedades")
-app.add_typer(reservations_app, name="reservations", help="Gestión de reservas")
+app.add_typer(reservations_app, name="reservations",
+              help="Gestión de reservas")
 
 # Variable global para almacenar el usuario actual
 current_user_session = None
@@ -47,19 +50,19 @@ def main(ctx: typer.Context):
 async def interactive_mode():
     """Modo interactivo principal del CLI."""
     global current_user_session
-    
+
     typer.echo("🏠 BIENVENIDO AL SISTEMA AIRBNB")
     typer.echo("=" * 50)
-    
+
     auth_service = AuthService()
-    
+
     # Loop principal del sistema
     while True:
         try:
             if current_user_session is None:
                 # No hay sesión activa - mostrar menú de autenticación
                 action = await show_auth_menu()
-                
+
                 if action == "login":
                     current_user_session = await handle_login(auth_service)
                 elif action == "register":
@@ -70,7 +73,7 @@ async def interactive_mode():
             else:
                 # Hay sesión activa - mostrar menú principal
                 action = await show_main_menu(current_user_session)
-                
+
                 if action == "logout":
                     await handle_logout(auth_service)
                     current_user_session = None
@@ -80,12 +83,14 @@ async def interactive_mode():
                     await show_mongo_stats(current_user_session)
                 elif action == "properties":
                     await handle_property_management(current_user_session)
+                elif action == "availability":
+                    await handle_availability_management(current_user_session)
                 elif action == "reservations":
                     await handle_reservation_management(current_user_session)
                 elif action == "exit":
                     typer.echo("👋 ¡Hasta luego!")
                     break
-                
+
         except KeyboardInterrupt:
             typer.echo("\n👋 ¡Hasta luego!")
             break
@@ -101,7 +106,7 @@ async def show_auth_menu():
     typer.echo("1. 🔑 Iniciar Sesión")
     typer.echo("2. 📝 Registrarse")
     typer.echo("3. ❌ Salir")
-    
+
     while True:
         try:
             choice = typer.prompt("Selecciona una opción (1-3)", type=int)
@@ -122,27 +127,29 @@ async def show_main_menu(user_profile):
     typer.echo(f"\n🏠 MENÚ PRINCIPAL - {user_profile.nombre}")
     typer.echo(f"👤 Rol: {user_profile.rol}")
     typer.echo("-" * 40)
-    
+
     options = [
         "👤 Ver mi perfil",
         "🚪 Cerrar sesión",
         "❌ Salir del sistema"
     ]
-    
+
     # Agregar opciones específicas por rol
     if user_profile.rol in ['ANFITRION', 'AMBOS']:
         options.insert(-2, "📊 Ver estadísticas MongoDB")
         options.insert(-2, "🏠 Gestionar mis propiedades")
-    
+        options.insert(-2, "📅 Gestionar disponibilidad de propiedades")
+
     if user_profile.rol in ['HUESPED', 'AMBOS']:
         options.insert(-2, "📅 Gestionar mis reservas")
-    
+
     for i, option in enumerate(options, 1):
         typer.echo(f"{i}. {option}")
-    
+
     while True:
         try:
-            choice = typer.prompt(f"Selecciona una opción (1-{len(options)})", type=int)
+            choice = typer.prompt(
+                f"Selecciona una opción (1-{len(options)})", type=int)
             if 1 <= choice <= len(options):
                 if "perfil" in options[choice-1]:
                     return "profile"
@@ -150,14 +157,17 @@ async def show_main_menu(user_profile):
                     return "logout"
                 elif "estadísticas MongoDB" in options[choice-1]:
                     return "mongo_stats"
-                elif "propiedades" in options[choice-1]:
+                elif "Gestionar mis propiedades" in options[choice-1]:
                     return "properties"
+                elif "disponibilidad de propiedades" in options[choice-1]:
+                    return "availability"
                 elif "reservas" in options[choice-1]:
                     return "reservations"
                 elif "Salir" in options[choice-1]:
                     return "exit"
             else:
-                typer.echo(f"❌ Opción inválida. Selecciona entre 1 y {len(options)}.")
+                typer.echo(
+                    f"❌ Opción inválida. Selecciona entre 1 y {len(options)}.")
         except ValueError:
             typer.echo("❌ Por favor ingresa un número válido.")
 
@@ -166,14 +176,14 @@ async def handle_login(auth_service):
     """Maneja el proceso de login interactivo."""
     typer.echo("\n🔑 INICIAR SESIÓN")
     typer.echo("=" * 30)
-    
+
     email = typer.prompt("📧 Email")
     password = typer.prompt("🔐 Contraseña", hide_input=True)
-    
+
     typer.echo(f"\n🔄 Validando credenciales para {email}...")
-    
+
     result = await auth_service.login(email, password)
-    
+
     if result.success:
         typer.echo(f"✅ {result.message}")
         typer.echo(f"🎉 ¡Bienvenido/a {result.user_profile.nombre}!")
@@ -189,24 +199,24 @@ async def handle_register(auth_service):
     """Maneja el proceso de registro interactivo."""
     typer.echo("\n📝 REGISTRO DE NUEVO USUARIO")
     typer.echo("=" * 40)
-    
+
     email = typer.prompt("📧 Email")
     password = typer.prompt("🔐 Contraseña", hide_input=True)
     password_confirm = typer.prompt("🔐 Confirmar contraseña", hide_input=True)
-    
+
     if password != password_confirm:
         typer.echo("❌ Las contraseñas no coinciden.")
         typer.echo("Presiona Enter para continuar...")
         input()
         return None
-    
+
     nombre = typer.prompt("👤 Nombre completo")
-    
+
     typer.echo("\n🎭 Selecciona tu rol:")
     typer.echo("1. 🛏️  HUESPED - Solo reservar propiedades")
     typer.echo("2. 🏠 ANFITRION - Solo publicar propiedades")
     typer.echo("3. 🔄 AMBOS - Reservar y publicar propiedades")
-    
+
     while True:
         try:
             rol_choice = typer.prompt("Selecciona rol (1-3)", type=int)
@@ -218,19 +228,21 @@ async def handle_register(auth_service):
                 typer.echo("❌ Opción inválida. Selecciona 1, 2 o 3.")
         except ValueError:
             typer.echo("❌ Por favor ingresa un número válido.")
-    
+
     typer.echo(f"\n🔄 Registrando usuario {email} como {rol}...")
-    
+
     result = await auth_service.register(email, password, rol, nombre)
-    
+
     if result.success:
         typer.echo(f"✅ {result.message}")
         typer.echo(f"🎉 ¡Bienvenido/a {result.user_profile.nombre}!")
-        
+
         if result.user_profile.rol in ['ANFITRION', 'AMBOS']:
-            typer.echo(f"🏠 Tu ID de anfitrión es: {result.user_profile.anfitrion_id}")
-            typer.echo("📝 Se ha creado tu documento en MongoDB para gestionar calificaciones")
-        
+            typer.echo(
+                f"🏠 Tu ID de anfitrión es: {result.user_profile.anfitrion_id}")
+            typer.echo(
+                "📝 Se ha creado tu documento en MongoDB para gestionar calificaciones")
+
         return result.user_profile
     else:
         typer.echo(f"❌ {result.message}")
@@ -256,14 +268,14 @@ async def show_user_profile(user_profile):
     typer.echo(f"👤 Nombre: {user_profile.nombre}")
     typer.echo(f"🎭 Rol: {user_profile.rol}")
     typer.echo(f"🆔 ID Usuario: {user_profile.user_id}")
-    
+
     if user_profile.huesped_id:
         typer.echo(f"🛏️  ID Huésped: {user_profile.huesped_id}")
     if user_profile.anfitrion_id:
         typer.echo(f"🏠 ID Anfitrión: {user_profile.anfitrion_id}")
-    
+
     typer.echo(f"📅 Registro: {user_profile.fecha_registro}")
-    
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 
@@ -273,34 +285,36 @@ async def show_mongo_stats(user_profile):
     if user_profile.rol not in ['ANFITRION', 'AMBOS']:
         typer.echo("❌ Esta función solo está disponible para anfitriones.")
         return
-    
+
     mongo_service = MongoHostService()
-    
+
     typer.echo("\n📊 ESTADÍSTICAS MONGODB")
     typer.echo("=" * 40)
-    
+
     # Obtener documento del anfitrión
     result = await mongo_service.get_host_document(user_profile.anfitrion_id)
-    
+
     if result.get('success'):
         doc = result.get('document')
         ratings = doc.get('ratings', [])
         stats = doc.get('stats', {})
-        
+
         typer.echo(f"🏠 Anfitrión ID: {user_profile.anfitrion_id}")
         typer.echo(f"⭐ Total calificaciones: {len(ratings)}")
         typer.echo(f"📊 Promedio: {stats.get('average_rating', 0.0):.1f}/5")
-        typer.echo(f"💬 Reviews con comentarios: {stats.get('total_reviews', 0)}")
-        
+        typer.echo(
+            f"💬 Reviews con comentarios: {stats.get('total_reviews', 0)}")
+
         if ratings:
             typer.echo("\n📝 Últimas calificaciones:")
-            for i, rating in enumerate(ratings[-3:], 1):  # Mostrar las últimas 3
+            # Mostrar las últimas 3
+            for i, rating in enumerate(ratings[-3:], 1):
                 typer.echo(f"   {i}. ⭐ {rating.get('rating', 'N/A')}/5")
                 if rating.get('comment'):
                     typer.echo(f"      💬 \"{rating.get('comment')}\"")
     else:
         typer.echo("❌ No se pudo obtener información de MongoDB")
-    
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 
@@ -308,26 +322,27 @@ async def show_mongo_stats(user_profile):
 async def handle_property_management(user_profile):
     """Gestiona las propiedades del anfitrión."""
     from services.properties import PropertyService
-    
+
     # Verificar que el usuario sea anfitrión
     if user_profile.rol not in ['ANFITRION', 'AMBOS']:
         typer.echo("❌ Esta función solo está disponible para anfitriones")
         typer.echo("Presiona Enter para continuar...")
         input()
         return
-    
+
     if not user_profile.anfitrion_id:
         typer.echo("❌ No se encontró ID de anfitrión")
         typer.echo("Presiona Enter para continuar...")
         input()
         return
-    
+
     property_service = PropertyService()
-    
+
     while True:
         typer.echo("\n🏠 GESTIÓN DE PROPIEDADES")
         typer.echo("=" * 50)
-        typer.echo(f"👤 Anfitrión: {user_profile.nombre} (ID: {user_profile.anfitrion_id})")
+        typer.echo(
+            f"👤 Anfitrión: {user_profile.nombre} (ID: {user_profile.anfitrion_id})")
         typer.echo("-" * 50)
         typer.echo("1. 📋 Ver mis propiedades")
         typer.echo("2. ➕ Crear nueva propiedad")
@@ -335,10 +350,10 @@ async def handle_property_management(user_profile):
         typer.echo("4. ✏️  Editar propiedad")
         typer.echo("5. 🗑️  Eliminar propiedad")
         typer.echo("6. ⬅️  Volver al menú principal")
-        
+
         try:
             choice = typer.prompt("Selecciona una opción (1-6)", type=int)
-            
+
             if choice == 1:
                 # Listar propiedades
                 await show_host_properties(property_service, user_profile.anfitrion_id)
@@ -373,13 +388,13 @@ async def show_host_properties(property_service, anfitrion_id):
     """Muestra las propiedades del anfitrión."""
     typer.echo("\n📋 MIS PROPIEDADES")
     typer.echo("=" * 50)
-    
+
     result = await property_service.list_properties_by_host(anfitrion_id)
-    
+
     if result.get("success"):
         properties = result.get("properties", [])
         total = result.get("total", 0)
-        
+
         if total == 0:
             typer.echo("📝 No tienes propiedades registradas aún")
         else:
@@ -393,7 +408,7 @@ async def show_host_properties(property_service, anfitrion_id):
                 typer.echo()
     else:
         typer.echo(f"❌ Error: {result.get('error', 'Error desconocido')}")
-    
+
     typer.echo("Presiona Enter para continuar...")
     input()
 
@@ -402,34 +417,41 @@ async def create_property_interactive(property_service, anfitrion_id):
     """Crea una propiedad de forma interactiva."""
     typer.echo("\n➕ CREAR NUEVA PROPIEDAD")
     typer.echo("=" * 50)
-    
+
     try:
         nombre = typer.prompt("📝 Nombre de la propiedad")
         descripcion = typer.prompt("📄 Descripción")
         capacidad = typer.prompt("👥 Capacidad (personas)", type=int)
         ciudad_id = typer.prompt("🏙️  ID de la ciudad", type=int)
-        tipo_propiedad_id = typer.prompt("🏠 ID del tipo de propiedad", type=int, default=1)
-        
+        tipo_propiedad_id = typer.prompt(
+            "🏠 ID del tipo de propiedad", type=int, default=1)
+
         # Amenities opcionales
-        amenities_input = typer.prompt("✨ IDs de amenities (separados por coma, Enter para omitir)", default="")
+        amenities_input = typer.prompt(
+            "✨ IDs de amenities (separados por coma, Enter para omitir)", default="")
         amenity_ids = None
         if amenities_input:
-            amenity_ids = [int(x.strip()) for x in amenities_input.split(",") if x.strip()]
-        
+            amenity_ids = [int(x.strip())
+                           for x in amenities_input.split(",") if x.strip()]
+
         # Servicios opcionales
-        servicios_input = typer.prompt("🔧 IDs de servicios (separados por coma, Enter para omitir)", default="")
+        servicios_input = typer.prompt(
+            "🔧 IDs de servicios (separados por coma, Enter para omitir)", default="")
         servicio_ids = None
         if servicios_input:
-            servicio_ids = [int(x.strip()) for x in servicios_input.split(",") if x.strip()]
-        
+            servicio_ids = [int(x.strip())
+                            for x in servicios_input.split(",") if x.strip()]
+
         # Reglas opcionales
-        reglas_input = typer.prompt("📜 IDs de reglas (separados por coma, Enter para omitir)", default="")
+        reglas_input = typer.prompt(
+            "📜 IDs de reglas (separados por coma, Enter para omitir)", default="")
         regla_ids = None
         if reglas_input:
-            regla_ids = [int(x.strip()) for x in reglas_input.split(",") if x.strip()]
-        
+            regla_ids = [int(x.strip())
+                         for x in reglas_input.split(",") if x.strip()]
+
         typer.echo("\n🔄 Creando propiedad...")
-        
+
         result = await property_service.create_property(
             nombre=nombre,
             descripcion=descripcion,
@@ -443,18 +465,18 @@ async def create_property_interactive(property_service, anfitrion_id):
             generar_calendario=True,
             dias_calendario=365
         )
-        
+
         if result.get("success"):
             typer.echo(f"\n✅ {result.get('message')}")
             typer.echo(f"🆔 ID de la propiedad: {result.get('property_id')}")
         else:
             typer.echo(f"\n❌ Error: {result.get('error')}")
-    
+
     except ValueError as e:
         typer.echo(f"\n❌ Error en los datos ingresados: {e}")
     except Exception as e:
         typer.echo(f"\n❌ Error inesperado: {e}")
-    
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 
@@ -463,12 +485,12 @@ async def show_property_details(property_service):
     """Muestra los detalles de una propiedad."""
     typer.echo("\n📝 VER DETALLES DE PROPIEDAD")
     typer.echo("=" * 50)
-    
+
     try:
         propiedad_id = typer.prompt("🆔 ID de la propiedad", type=int)
-        
+
         result = await property_service.get_property(propiedad_id)
-        
+
         if result.get("success"):
             prop = result.get("property")
             typer.echo(f"\n🏠 {prop['nombre']}")
@@ -477,29 +499,29 @@ async def show_property_details(property_service):
             typer.echo(f"   👥 Capacidad: {prop['capacidad']} personas")
             typer.echo(f"   🏙️  Ciudad: {prop.get('ciudad', 'N/A')}")
             typer.echo(f"   🏠 Tipo: {prop.get('tipo_propiedad', 'N/A')}")
-            
+
             if prop.get('amenities'):
                 typer.echo("\n   ✨ Amenities:")
                 for amenity in prop['amenities']:
                     typer.echo(f"      - {amenity.get('nombre', 'N/A')}")
-            
+
             if prop.get('servicios'):
                 typer.echo("\n   🔧 Servicios:")
                 for servicio in prop['servicios']:
                     typer.echo(f"      - {servicio.get('nombre', 'N/A')}")
-            
+
             if prop.get('reglas'):
                 typer.echo("\n   📜 Reglas:")
                 for regla in prop['reglas']:
                     typer.echo(f"      - {regla.get('descripcion', 'N/A')}")
         else:
             typer.echo(f"\n❌ Error: {result.get('error')}")
-    
+
     except ValueError:
         typer.echo("\n❌ ID inválido")
     except Exception as e:
         typer.echo(f"\n❌ Error: {e}")
-    
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 
@@ -508,10 +530,10 @@ async def update_property_interactive(property_service, anfitrion_id):
     """Actualiza una propiedad de forma interactiva."""
     typer.echo("\n✏️  EDITAR PROPIEDAD")
     typer.echo("=" * 50)
-    
+
     try:
         propiedad_id = typer.prompt("🆔 ID de la propiedad a editar", type=int)
-        
+
         # Verificar que la propiedad pertenece al anfitrión
         prop_result = await property_service.get_property(propiedad_id)
         if not prop_result.get("success"):
@@ -519,32 +541,34 @@ async def update_property_interactive(property_service, anfitrion_id):
             typer.echo("\nPresiona Enter para continuar...")
             input()
             return
-        
+
         prop = prop_result.get("property")
         if prop.get('anfitrion_id') != anfitrion_id:
             typer.echo("❌ Esta propiedad no te pertenece")
             typer.echo("\nPresiona Enter para continuar...")
             input()
             return
-        
+
         typer.echo(f"\nEditando: {prop['nombre']}")
         typer.echo("(Presiona Enter para mantener el valor actual)\n")
-        
+
         nombre = typer.prompt(f"📝 Nuevo nombre [{prop['nombre']}]", default="")
-        descripcion = typer.prompt(f"📄 Nueva descripción [{prop.get('descripcion', 'N/A')}]", default="")
-        capacidad_input = typer.prompt(f"👥 Nueva capacidad [{prop['capacidad']}]", default="")
-        
+        descripcion = typer.prompt(
+            f"📄 Nueva descripción [{prop.get('descripcion', 'N/A')}]", default="")
+        capacidad_input = typer.prompt(
+            f"👥 Nueva capacidad [{prop['capacidad']}]", default="")
+
         capacidad = int(capacidad_input) if capacidad_input else None
-        
+
         typer.echo("\n🔄 Actualizando propiedad...")
-        
+
         result = await property_service.update_property(
             propiedad_id,
             nombre=nombre if nombre else None,
             descripcion=descripcion if descripcion else None,
             capacidad=capacidad
         )
-        
+
         if result.get("success"):
             typer.echo(f"\n✅ {result.get('message')}")
             updated_prop = result.get("property")
@@ -552,12 +576,12 @@ async def update_property_interactive(property_service, anfitrion_id):
             typer.echo(f"   Capacidad: {updated_prop['capacidad']} personas")
         else:
             typer.echo(f"\n❌ Error: {result.get('error')}")
-    
+
     except ValueError as e:
         typer.echo(f"\n❌ Error en los datos: {e}")
     except Exception as e:
         typer.echo(f"\n❌ Error: {e}")
-    
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 
@@ -566,10 +590,11 @@ async def delete_property_interactive(property_service, anfitrion_id):
     """Elimina una propiedad de forma interactiva."""
     typer.echo("\n🗑️  ELIMINAR PROPIEDAD")
     typer.echo("=" * 50)
-    
+
     try:
-        propiedad_id = typer.prompt("🆔 ID de la propiedad a eliminar", type=int)
-        
+        propiedad_id = typer.prompt(
+            "🆔 ID de la propiedad a eliminar", type=int)
+
         # Verificar que la propiedad pertenece al anfitrión
         prop_result = await property_service.get_property(propiedad_id)
         if not prop_result.get("success"):
@@ -577,34 +602,34 @@ async def delete_property_interactive(property_service, anfitrion_id):
             typer.echo("\nPresiona Enter para continuar...")
             input()
             return
-        
+
         prop = prop_result.get("property")
         if prop.get('anfitrion_id') != anfitrion_id:
             typer.echo("❌ Esta propiedad no te pertenece")
             typer.echo("\nPresiona Enter para continuar...")
             input()
             return
-        
+
         typer.echo(f"\n⚠️  Vas a eliminar: {prop['nombre']}")
         typer.echo("⚠️  Esta acción NO se puede deshacer")
-        
+
         if typer.confirm("\n¿Estás seguro de que deseas eliminar esta propiedad?"):
             typer.echo("\n🔄 Eliminando propiedad...")
-            
+
             result = await property_service.delete_property(propiedad_id)
-            
+
             if result.get("success"):
                 typer.echo(f"\n✅ {result.get('message')}")
             else:
                 typer.echo(f"\n❌ Error: {result.get('error')}")
         else:
             typer.echo("\n❌ Eliminación cancelada")
-    
+
     except ValueError:
         typer.echo("\n❌ ID inválido")
     except Exception as e:
         typer.echo(f"\n❌ Error: {e}")
-    
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 
@@ -629,8 +654,10 @@ def auth_cmd(
         try:
             if action == "register":
                 if not all([email, password, rol, nombre]):
-                    typer.echo("❌ Para registrar necesitas: --email, --password, --role, --name")
-                    typer.echo("   Roles disponibles: HUESPED, ANFITRION, AMBOS")
+                    typer.echo(
+                        "❌ Para registrar necesitas: --email, --password, --role, --name")
+                    typer.echo(
+                        "   Roles disponibles: HUESPED, ANFITRION, AMBOS")
                     return
 
                 typer.echo(f"📝 Registrando usuario: {email} como {rol}")
@@ -644,7 +671,8 @@ def auth_cmd(
                         typer.echo(f"📧 Email: {profile.email}")
                         typer.echo(f"🏷️  Rol: {profile.rol}")
                         if profile.anfitrion_id:
-                            typer.echo(f"🏠 ID Anfitrión: {profile.anfitrion_id}")
+                            typer.echo(
+                                f"🏠 ID Anfitrión: {profile.anfitrion_id}")
                 else:
                     typer.echo(f"❌ {result.message}")
 
@@ -705,16 +733,20 @@ def auth_cmd(
                     if mongo_status.get('success'):
                         typer.echo("✅ MongoDB: Conectado")
                     else:
-                        typer.echo(f"❌ MongoDB: {mongo_status.get('error', 'Error desconocido')}")
+                        typer.echo(
+                            f"❌ MongoDB: {mongo_status.get('error', 'Error desconocido')}")
 
-                    typer.echo("\n🎉 Sistema de autenticación funcionando correctamente")
+                    typer.echo(
+                        "\n🎉 Sistema de autenticación funcionando correctamente")
 
                 except Exception as e:
-                    typer.echo(f"❌ Error en verificación del sistema: {str(e)}")
+                    typer.echo(
+                        f"❌ Error en verificación del sistema: {str(e)}")
 
             else:
                 typer.echo(f"❌ Acción '{action}' no reconocida")
-                typer.echo("Acciones disponibles: register, login, profile, status")
+                typer.echo(
+                    "Acciones disponibles: register, login, profile, status")
 
         except Exception as e:
             typer.echo(f"❌ Error durante {action}: {str(e)}")
@@ -754,16 +786,20 @@ def mongo_cmd(
                     if hosts:
                         for i, host in enumerate(hosts, 1):
                             typer.echo(f"{i}. Host ID: {host['host_id']}")
-                            typer.echo(f"   Ratings: {len(host.get('ratings', []))}")
+                            typer.echo(
+                                f"   Ratings: {len(host.get('ratings', []))}")
                             stats = host.get('stats', {})
                             if stats:
-                                typer.echo(f"   Promedio: {stats.get('average_rating', 'N/A')}")
-                                typer.echo(f"   Total: {stats.get('total_ratings', 0)}")
+                                typer.echo(
+                                    f"   Promedio: {stats.get('average_rating', 'N/A')}")
+                                typer.echo(
+                                    f"   Total: {stats.get('total_ratings', 0)}")
                             typer.echo()
                     else:
                         typer.echo("No hay anfitriones registrados")
                 else:
-                    typer.echo(f"❌ Error: {result.get('error', 'Error desconocido')}")
+                    typer.echo(
+                        f"❌ Error: {result.get('error', 'Error desconocido')}")
 
             elif action == "ratings":
                 if not host_id:
@@ -780,22 +816,29 @@ def mongo_cmd(
 
                     if ratings:
                         for i, rating_doc in enumerate(ratings, 1):
-                            typer.echo(f"{i}. Rating: {rating_doc.get('rating', 'N/A')}/5")
-                            typer.echo(f"   Comentario: {rating_doc.get('comment', 'Sin comentario')}")
-                            typer.echo(f"   Fecha: {rating_doc.get('date', 'N/A')}")
+                            typer.echo(
+                                f"{i}. Rating: {rating_doc.get('rating', 'N/A')}/5")
+                            typer.echo(
+                                f"   Comentario: {rating_doc.get('comment', 'Sin comentario')}")
+                            typer.echo(
+                                f"   Fecha: {rating_doc.get('date', 'N/A')}")
                             typer.echo()
 
                         stats = doc.get('stats', {})
-                        typer.echo(f"📊 Promedio: {stats.get('average_rating', 'N/A')}/5")
-                        typer.echo(f"📊 Total ratings: {stats.get('total_ratings', 0)}")
+                        typer.echo(
+                            f"📊 Promedio: {stats.get('average_rating', 'N/A')}/5")
+                        typer.echo(
+                            f"📊 Total ratings: {stats.get('total_ratings', 0)}")
                     else:
                         typer.echo("No hay calificaciones para este anfitrión")
                 else:
-                    typer.echo(f"❌ Error: {result.get('error', 'Anfitrión no encontrado')}")
+                    typer.echo(
+                        f"❌ Error: {result.get('error', 'Anfitrión no encontrado')}")
 
             elif action == "add-rating":
                 if not all([host_id, rating]):
-                    typer.echo("❌ Para agregar rating necesitas: --host-id --rating")
+                    typer.echo(
+                        "❌ Para agregar rating necesitas: --host-id --rating")
                     typer.echo("   Rating debe ser entre 1 y 5")
                     return
 
@@ -805,15 +848,18 @@ def mongo_cmd(
 
                 result = await mongo_service.add_rating(host_id, rating, comment or "")
                 if result.get('success'):
-                    typer.echo(f"✅ Rating {rating}/5 agregado al anfitrión {host_id}")
-                    
+                    typer.echo(
+                        f"✅ Rating {rating}/5 agregado al anfitrión {host_id}")
+
                     # Mostrar estadísticas actualizadas
                     stats_result = await mongo_service.get_host_stats(host_id)
                     if stats_result.get('success'):
                         stats = stats_result.get('stats', {})
-                        typer.echo(f"📊 Nuevo promedio: {stats.get('average_rating', 'N/A')}/5")
+                        typer.echo(
+                            f"📊 Nuevo promedio: {stats.get('average_rating', 'N/A')}/5")
                 else:
-                    typer.echo(f"❌ Error: {result.get('error', 'Error desconocido')}")
+                    typer.echo(
+                        f"❌ Error: {result.get('error', 'Error desconocido')}")
 
             else:
                 typer.echo(f"❌ Acción '{action}' no reconocida")
@@ -854,7 +900,7 @@ def users_cmd(
                     typer.echo(f"Nombre: {profile.nombre}")
                     typer.echo(f"Rol: {profile.rol}")
                     typer.echo(f"Fecha registro: {profile.fecha_registro}")
-                    
+
                     if profile.huesped_id:
                         typer.echo(f"ID Huésped: {profile.huesped_id}")
                     if profile.anfitrion_id:
@@ -865,12 +911,14 @@ def users_cmd(
             elif action == "stats":
                 typer.echo("📊 ESTADÍSTICAS DE USUARIOS")
                 typer.echo("=" * 40)
-                
+
                 stats = await user_service.get_user_statistics()
                 if stats:
-                    typer.echo(f"Total usuarios: {stats.get('total_users', 0)}")
+                    typer.echo(
+                        f"Total usuarios: {stats.get('total_users', 0)}")
                     typer.echo(f"Huéspedes: {stats.get('total_huespedes', 0)}")
-                    typer.echo(f"Anfitriones: {stats.get('total_anfitriones', 0)}")
+                    typer.echo(
+                        f"Anfitriones: {stats.get('total_anfitriones', 0)}")
                     typer.echo(f"Ambos roles: {stats.get('total_ambos', 0)}")
                 else:
                     typer.echo("❌ Error obteniendo estadísticas")
@@ -884,6 +932,349 @@ def users_cmd(
             logger.error(f"Error en comando users {action}", error=str(e))
 
     asyncio.run(_users())
+
+
+async def handle_availability_management(user_profile):
+    """Gestiona la disponibilidad de propiedades del anfitrión."""
+    from services.properties import PropertyService
+    from datetime import date, datetime
+
+    # Verificar que el usuario sea anfitrión
+    if user_profile.rol not in ['ANFITRION', 'AMBOS']:
+        typer.echo("❌ Esta función solo está disponible para anfitriones")
+        typer.echo("Presiona Enter para continuar...")
+        input()
+        return
+
+    if not user_profile.anfitrion_id:
+        typer.echo("❌ No se encontró ID de anfitrión")
+        typer.echo("Presiona Enter para continuar...")
+        input()
+        return
+
+    property_service = PropertyService()
+    reservation_service = ReservationService()
+
+    while True:
+        typer.echo("\n📅 GESTIÓN DE DISPONIBILIDAD")
+        typer.echo("=" * 50)
+        typer.echo(
+            f"👤 Anfitrión: {user_profile.nombre} (ID: {user_profile.anfitrion_id})")
+        typer.echo("-" * 50)
+        typer.echo("1. 📋 Ver mis propiedades")
+        typer.echo("2. 🔍 Verificar disponibilidad de una propiedad")
+        typer.echo("3. 🚫 Bloquear fechas de una propiedad")
+        typer.echo("4. ✅ Habilitar fechas de una propiedad")
+        typer.echo("5. 💰 Configurar precios por fechas")
+        typer.echo("6. 📊 Ver calendario de disponibilidad")
+        typer.echo("7. ⬅️  Volver al menú principal")
+
+        try:
+            choice = typer.prompt("Selecciona una opción (1-7)", type=int)
+
+            if choice == 1:
+                # Ver propiedades del anfitrión
+                await show_host_properties(property_service, user_profile.anfitrion_id)
+            elif choice == 2:
+                # Verificar disponibilidad
+                await check_property_availability_interactive(reservation_service, user_profile.anfitrion_id)
+            elif choice == 3:
+                # Bloquear fechas
+                await block_property_dates_interactive(reservation_service, user_profile.anfitrion_id)
+            elif choice == 4:
+                # Habilitar fechas
+                await unblock_property_dates_interactive(reservation_service, user_profile.anfitrion_id)
+            elif choice == 5:
+                # Configurar precios
+                await set_property_prices_interactive(reservation_service, user_profile.anfitrion_id)
+            elif choice == 6:
+                # Ver calendario
+                await show_availability_calendar_interactive(reservation_service, user_profile.anfitrion_id)
+            elif choice == 7:
+                # Volver
+                break
+            else:
+                typer.echo("❌ Opción inválida. Selecciona entre 1 y 7.")
+                typer.echo("Presiona Enter para continuar...")
+                input()
+        except ValueError:
+            typer.echo("❌ Por favor ingresa un número válido.")
+            typer.echo("Presiona Enter para continuar...")
+            input()
+
+
+async def check_property_availability_interactive(reservation_service, anfitrion_id):
+    """Verifica la disponibilidad de una propiedad de forma interactiva."""
+    try:
+        typer.echo("\n🔍 VERIFICAR DISPONIBILIDAD")
+        typer.echo("=" * 50)
+
+        property_id = typer.prompt("🏠 ID de la propiedad", type=int)
+
+        # Validar que la propiedad pertenece al anfitrión
+        from services.properties import PropertyService
+        prop_service = PropertyService()
+        properties_result = await prop_service.list_properties_by_host(anfitrion_id)
+
+        if not properties_result.get('success', False):
+            typer.echo("❌ Error obteniendo propiedades del anfitrión")
+            typer.echo("Presiona Enter para continuar...")
+            input()
+            return
+
+        if not any(p['id'] == property_id for p in properties_result.get('properties', [])):
+            typer.echo("❌ No tienes permisos para gestionar esta propiedad")
+            typer.echo("Presiona Enter para continuar...")
+            input()
+            return
+
+        start_date_str = typer.prompt("📅 Fecha inicio (YYYY-MM-DD)")
+        end_date_str = typer.prompt("📅 Fecha fin (YYYY-MM-DD)")
+
+        try:
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+
+            if end_date <= start_date:
+                typer.echo(
+                    "❌ La fecha fin debe ser posterior a la fecha inicio")
+                typer.echo("Presiona Enter para continuar...")
+                input()
+                return
+
+            # Verificar disponibilidad
+            is_available = await reservation_service._check_availability(property_id, start_date, end_date)
+            total_price = await reservation_service._calculate_total_price(property_id, start_date, end_date)
+
+            num_days = (end_date - start_date).days
+
+            typer.echo("\n📊 RESULTADO:")
+            if is_available:
+                typer.echo(
+                    f"✅ Propiedad {property_id} DISPONIBLE para {num_days} días")
+                typer.echo(f"💰 Precio estimado: ${total_price}")
+                typer.echo(f"📅 Período: {start_date} a {end_date}")
+            else:
+                typer.echo(
+                    f"❌ Propiedad {property_id} NO DISPONIBLE para {num_days} días")
+                typer.echo(f"📅 Período: {start_date} a {end_date}")
+
+        except ValueError:
+            typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
+
+    except Exception as e:
+        typer.echo(f"❌ Error: {str(e)}")
+
+    typer.echo("\nPresiona Enter para continuar...")
+    input()
+
+
+async def block_property_dates_interactive(reservation_service, anfitrion_id):
+    """Bloquea fechas de una propiedad de forma interactiva."""
+    try:
+        typer.echo("\n🚫 BLOQUEAR FECHAS")
+        typer.echo("=" * 50)
+
+        property_id = typer.prompt("🏠 ID de la propiedad", type=int)
+
+        # Validar propiedad del anfitrión
+        from services.properties import PropertyService
+        prop_service = PropertyService()
+        properties_result = await prop_service.list_properties_by_host(anfitrion_id)
+
+        if not properties_result.get('success', False):
+            typer.echo("❌ Error obteniendo propiedades del anfitrión")
+            typer.echo("Presiona Enter para continuar...")
+            input()
+            return
+
+        if not any(p['id'] == property_id for p in properties_result.get('properties', [])):
+            typer.echo("❌ No tienes permisos para gestionar esta propiedad")
+            typer.echo("Presiona Enter para continuar...")
+            input()
+            return
+
+        start_date_str = typer.prompt("📅 Fecha inicio (YYYY-MM-DD)")
+        end_date_str = typer.prompt("📅 Fecha fin (YYYY-MM-DD)")
+
+        try:
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+
+            if end_date <= start_date:
+                typer.echo(
+                    "❌ La fecha fin debe ser posterior a la fecha inicio")
+                typer.echo("Presiona Enter para continuar...")
+                input()
+                return
+
+            # Bloquear fechas
+            await reservation_service._mark_dates_unavailable(property_id, start_date, end_date)
+
+            num_days = (end_date - start_date).days
+            typer.echo(f"\n✅ {num_days} fechas bloqueadas exitosamente")
+            typer.echo(f"🏠 Propiedad: {property_id}")
+            typer.echo(f"📅 Período: {start_date} a {end_date}")
+
+        except ValueError:
+            typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
+
+    except Exception as e:
+        typer.echo(f"❌ Error: {str(e)}")
+
+    typer.echo("\nPresiona Enter para continuar...")
+    input()
+
+
+async def unblock_property_dates_interactive(reservation_service, anfitrion_id):
+    """Habilita fechas de una propiedad de forma interactiva."""
+    try:
+        typer.echo("\n✅ HABILITAR FECHAS")
+        typer.echo("=" * 50)
+
+        property_id = typer.prompt("🏠 ID de la propiedad", type=int)
+
+        # Validar propiedad del anfitrión
+        from services.properties import PropertyService
+        prop_service = PropertyService()
+        properties_result = await prop_service.list_properties_by_host(anfitrion_id)
+
+        if not properties_result.get('success', False):
+            typer.echo("❌ Error obteniendo propiedades del anfitrión")
+            typer.echo("Presiona Enter para continuar...")
+            input()
+            return
+
+        if not any(p['id'] == property_id for p in properties_result.get('properties', [])):
+            typer.echo("❌ No tienes permisos para gestionar esta propiedad")
+            typer.echo("Presiona Enter para continuar...")
+            input()
+            return
+
+        start_date_str = typer.prompt("📅 Fecha inicio (YYYY-MM-DD)")
+        end_date_str = typer.prompt("📅 Fecha fin (YYYY-MM-DD)")
+
+        price_input = typer.prompt(
+            "💰 Precio por noche (Enter para usar $100 por defecto)", default="")
+        price_per_night = None
+        if price_input.strip():
+            try:
+                price_per_night = float(price_input)
+            except ValueError:
+                typer.echo("❌ Precio inválido, usando precio por defecto")
+
+        try:
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+
+            if end_date <= start_date:
+                typer.echo(
+                    "❌ La fecha fin debe ser posterior a la fecha inicio")
+                typer.echo("Presiona Enter para continuar...")
+                input()
+                return
+
+            # Habilitar fechas
+            await reservation_service._mark_dates_available(property_id, start_date, end_date, price_per_night)
+
+            num_days = (end_date - start_date).days
+            price_msg = f" a ${price_per_night}/noche" if price_per_night else " (precio por defecto: $100/noche)"
+
+            typer.echo(f"\n✅ {num_days} fechas habilitadas exitosamente")
+            typer.echo(f"🏠 Propiedad: {property_id}")
+            typer.echo(f"📅 Período: {start_date} a {end_date}")
+            typer.echo(f"💰 Precio{price_msg}")
+
+        except ValueError:
+            typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
+
+    except Exception as e:
+        typer.echo(f"❌ Error: {str(e)}")
+
+    typer.echo("\nPresiona Enter para continuar...")
+    input()
+
+
+async def set_property_prices_interactive(reservation_service, anfitrion_id):
+    """Configura precios por fechas de forma interactiva."""
+    typer.echo("\n💰 CONFIGURAR PRECIOS")
+    typer.echo("=" * 50)
+    typer.echo("Esta función utiliza la misma lógica que 'Habilitar fechas'")
+    typer.echo(
+        "Use la opción 4 (Habilitar fechas) para configurar precios específicos")
+    typer.echo("\nPresiona Enter para continuar...")
+    input()
+
+
+async def show_availability_calendar_interactive(reservation_service, anfitrion_id):
+    """Muestra un resumen del calendario de disponibilidad."""
+    from db.postgres import execute_query
+
+    try:
+        typer.echo("\n📊 CALENDARIO DE DISPONIBILIDAD")
+        typer.echo("=" * 50)
+
+        property_id = typer.prompt("🏠 ID de la propiedad", type=int)
+
+        # Validar propiedad del anfitrión
+        from services.properties import PropertyService
+        prop_service = PropertyService()
+        properties_result = await prop_service.list_properties_by_host(anfitrion_id)
+
+        if not properties_result.get('success', False):
+            typer.echo("❌ Error obteniendo propiedades del anfitrión")
+            typer.echo("Presiona Enter para continuar...")
+            input()
+            return
+
+        if not any(p['id'] == property_id for p in properties_result.get('properties', [])):
+            typer.echo("❌ No tienes permisos para gestionar esta propiedad")
+            typer.echo("Presiona Enter para continuar...")
+            input()
+            return
+
+        # Obtener disponibilidad próxima
+        query = """
+            SELECT 
+                dia,
+                disponible,
+                price_per_night,
+                CASE 
+                    WHEN disponible = true THEN 'Disponible'
+                    ELSE 'Bloqueada'
+                END as estado
+            FROM propiedad_disponibilidad 
+            WHERE propiedad_id = $1 
+            AND dia >= CURRENT_DATE 
+            AND dia <= CURRENT_DATE + INTERVAL '30 days'
+            ORDER BY dia
+            LIMIT 30
+        """
+
+        results = await execute_query(query, property_id)
+
+        if results:
+            typer.echo(f"\n📅 Próximos 30 días para propiedad {property_id}:")
+            typer.echo("-" * 60)
+            typer.echo(f"{'Fecha':<12} {'Estado':<12} {'Precio/noche':<15}")
+            typer.echo("-" * 60)
+
+            for row in results:
+                fecha = row['dia'].strftime("%Y-%m-%d")
+                estado = "✅ Disponible" if row['disponible'] else "❌ Bloqueada"
+                precio = f"${row['price_per_night']}" if row['price_per_night'] else "No configurado"
+                typer.echo(f"{fecha:<12} {estado:<12} {precio:<15}")
+        else:
+            typer.echo(
+                f"\n📅 No hay disponibilidad configurada para la propiedad {property_id}")
+            typer.echo(
+                "💡 Tip: Use el script setup_availability.py para configurar disponibilidad inicial")
+
+    except Exception as e:
+        typer.echo(f"❌ Error: {str(e)}")
+
+    typer.echo("\nPresiona Enter para continuar...")
+    input()
 
 
 # Nota: Los comandos de propiedades están integrados vía app.add_typer(properties_app)

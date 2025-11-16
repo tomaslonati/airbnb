@@ -188,3 +188,72 @@ class Migration004CreateReviews(BaseMigration):
         """Eliminar tabla reviews."""
         await postgres.execute_command("DROP TABLE IF EXISTS reviews;")
         logger.info("Tabla reviews eliminada")
+
+
+class Migration005AddPriceToAvailability(BaseMigration):
+    """Agrega price_per_night a la tabla propiedad_disponibilidad existente."""
+
+    def __init__(self):
+        super().__init__("005", "Agregar price_per_night a propiedad_disponibilidad")
+
+    async def up(self):
+        """Agregar price_per_night a propiedad_disponibilidad."""
+
+        # Agregar columna price_per_night si no existe
+        query_add_price = """
+            ALTER TABLE propiedad_disponibilidad 
+            ADD COLUMN IF NOT EXISTS price_per_night DECIMAL(10,2);
+        """
+        await postgres.execute_command(query_add_price)
+
+        # Agregar timestamps si no existen
+        query_add_timestamps = """
+            ALTER TABLE propiedad_disponibilidad 
+            ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+        """
+        await postgres.execute_command(query_add_timestamps)
+
+        # Agregar restricción única si no existe
+        query_unique_constraint = """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint 
+                    WHERE conname = 'unique_propiedad_dia'
+                ) THEN
+                    ALTER TABLE propiedad_disponibilidad 
+                    ADD CONSTRAINT unique_propiedad_dia UNIQUE(propiedad_id, dia);
+                END IF;
+            END $$;
+        """
+        await postgres.execute_command(query_unique_constraint)
+
+        # Crear índices para mejorar performance
+        indices = [
+            "CREATE INDEX IF NOT EXISTS idx_propiedad_disponibilidad_fecha_rango ON propiedad_disponibilidad(dia);",
+            "CREATE INDEX IF NOT EXISTS idx_propiedad_disponibilidad_no_disponible ON propiedad_disponibilidad(disponible) WHERE disponible = FALSE;",
+            "CREATE INDEX IF NOT EXISTS idx_propiedad_disponibilidad_property_date ON propiedad_disponibilidad(propiedad_id, dia);"
+        ]
+
+        for index_query in indices:
+            await postgres.execute_command(index_query)
+
+        logger.info("Columnas e índices agregados a propiedad_disponibilidad")
+
+    async def down(self):
+        """Revertir cambios a propiedad_disponibilidad."""
+        commands = [
+            "DROP INDEX IF EXISTS idx_propiedad_disponibilidad_no_disponible;",
+            "DROP INDEX IF EXISTS idx_propiedad_disponibilidad_fecha_rango;",
+            "DROP INDEX IF EXISTS idx_propiedad_disponibilidad_property_date;",
+            "ALTER TABLE propiedad_disponibilidad DROP CONSTRAINT IF EXISTS unique_propiedad_dia;",
+            "ALTER TABLE propiedad_disponibilidad DROP COLUMN IF EXISTS updated_at;",
+            "ALTER TABLE propiedad_disponibilidad DROP COLUMN IF EXISTS created_at;",
+            "ALTER TABLE propiedad_disponibilidad DROP COLUMN IF EXISTS price_per_night;"
+        ]
+
+        for command in commands:
+            await postgres.execute_command(command)
+
+        logger.info("Cambios revertidos en propiedad_disponibilidad")

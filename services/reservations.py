@@ -3,7 +3,7 @@ Servicio de reservas que utiliza PostgreSQL (Supabase).
 Cassandra logging será agregado en el futuro.
 """
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Dict, Any, Optional
 from decimal import Decimal
 from db.postgres import execute_query, execute_command, get_client
@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 class ReservationService:
     """
     Servicio para gestionar reservas de propiedades.
-    
+
     Responsabilidades:
     - Gestionar reservas en PostgreSQL
     - Registrar eventos en Cassandra
@@ -39,7 +39,7 @@ class ReservationService:
         """
         Placeholder para logging de eventos en Cassandra (futuro).
         Por ahora solo registra en logs.
-        
+
         Args:
             reserva_id: ID de la reserva
             event_type: Tipo de evento (CREATED, CANCELLED, CHECKED_IN, etc.)
@@ -59,6 +59,92 @@ class ReservationService:
         # TODO: Implementar logging en Cassandra cuando esté listo
         pass
 
+    async def _mark_dates_unavailable(
+        self,
+        propiedad_id: int,
+        check_in: date,
+        check_out: date,
+        reason: str = "Reserva confirmada"
+    ):
+        """
+        Marca fechas como no disponibles en la tabla property_availability.
+
+        Args:
+            propiedad_id: ID de la propiedad
+            check_in: Fecha de inicio
+            check_out: Fecha de fin
+            reason: Razón de la no disponibilidad
+        """
+        try:
+            current_date = check_in
+
+            while current_date < check_out:
+                # Usar UPSERT para evitar conflictos de fechas duplicadas
+                query = """
+                    INSERT INTO propiedad_disponibilidad (propiedad_id, dia, disponible, price_per_night)
+                    VALUES ($1, $2, FALSE, $3)
+                    ON CONFLICT (propiedad_id, dia)
+                    DO UPDATE SET 
+                        disponible = FALSE,
+                        updated_at = NOW()
+                """
+
+                await execute_command(query, propiedad_id, current_date, None)
+                current_date += timedelta(days=1)
+
+            logger.info(
+                f"Fechas {check_in} a {check_out} marcadas como no disponibles para propiedad {propiedad_id}")
+
+        except Exception as e:
+            logger.error(
+                f"Error marcando fechas como no disponibles: {str(e)}")
+            raise
+
+    async def _mark_dates_available(
+        self,
+        propiedad_id: int,
+        check_in: date,
+        check_out: date,
+        price_per_night: Optional[Decimal] = None
+    ):
+        """
+        Marca fechas como disponibles en la tabla property_availability.
+
+        Args:
+            propiedad_id: ID de la propiedad
+            check_in: Fecha de inicio
+            check_out: Fecha de fin
+            price_per_night: Precio por noche (opcional)
+        """
+        try:
+            current_date = check_in
+
+            # Si no se especifica precio, usar precio por defecto
+            if price_per_night is None:
+                # La tabla propiedad no tiene precio_base, usar precio estándar
+                price_per_night = Decimal('100')  # $100 por noche por defecto
+
+            while current_date < check_out:
+                query = """
+                    INSERT INTO propiedad_disponibilidad (propiedad_id, dia, disponible, price_per_night)
+                    VALUES ($1, $2, TRUE, $3)
+                    ON CONFLICT (propiedad_id, dia)
+                    DO UPDATE SET 
+                        disponible = TRUE,
+                        price_per_night = EXCLUDED.price_per_night,
+                        updated_at = NOW()
+                """
+
+                await execute_command(query, propiedad_id, current_date, price_per_night)
+                current_date += timedelta(days=1)
+
+            logger.info(
+                f"Fechas {check_in} a {check_out} marcadas como disponibles para propiedad {propiedad_id}")
+
+        except Exception as e:
+            logger.error(f"Error marcando fechas como disponibles: {str(e)}")
+            raise
+
     async def _check_availability(
         self,
         propiedad_id: int,
@@ -68,45 +154,65 @@ class ReservationService:
     ) -> bool:
         """
         Verifica si una propiedad está disponible en las fechas solicitadas.
-        
+        Ahora usa la tabla property_availability como fuente principal.
+
         Args:
             propiedad_id: ID de la propiedad
             check_in: Fecha de entrada
             check_out: Fecha de salida
             exclude_reserva_id: ID de reserva a excluir (para actualizaciones)
-            
+
         Returns:
             True si está disponible, False si no
         """
         try:
-            # Verificar que no haya reservas que se solapen
-            query = """
+            # Primero verificar en la tabla de disponibilidad
+            availability_query = """
+                SELECT COUNT(*) as unavailable_days
+                FROM propiedad_disponibilidad
+                WHERE propiedad_id = $1
+                AND dia >= $2
+                AND dia < $3
+                AND disponible = FALSE
+            """
+
+            availability_result = await execute_query(availability_query, propiedad_id, check_in, check_out)
+
+            # Si hay días marcados como no disponibles, no se puede reservar
+            if availability_result and availability_result[0]['unavailable_days'] > 0:
+                logger.warning(
+                    f"Propiedad {propiedad_id} tiene días no disponibles entre {check_in} y {check_out}")
+                return False
+
+            # Verificar que no haya reservas confirmadas que se solapen
+            reservations_query = """
                 SELECT COUNT(*) as count
                 FROM reserva r
                 JOIN estado_reserva er ON r.estado_reserva_id = er.id
                 WHERE r.propiedad_id = $1
                 AND er.nombre NOT IN ('Cancelada', 'Rechazada')
                 AND (
-                    (r.fecha_inicio <= $2 AND r.fecha_fin > $2)
-                    OR (r.fecha_inicio < $3 AND r.fecha_fin >= $3)
-                    OR (r.fecha_inicio >= $2 AND r.fecha_fin <= $3)
+                    (r.fecha_check_in <= $2 AND r.fecha_check_out > $2)
+                    OR (r.fecha_check_in < $3 AND r.fecha_check_out >= $3)
+                    OR (r.fecha_check_in >= $2 AND r.fecha_check_out <= $3)
                 )
             """
-            
+
             params = [propiedad_id, check_in, check_out]
-            
+
             if exclude_reserva_id:
-                query += " AND r.id != $4"
+                reservations_query += " AND r.id != $4"
                 params.append(exclude_reserva_id)
-            
-            result = await execute_query(query, *params)
-            
-            if result and result[0]['count'] > 0:
-                logger.warning(f"Propiedad {propiedad_id} no disponible entre {check_in} y {check_out}")
+
+            reservations_result = await execute_query(reservations_query, *params)
+
+            if reservations_result and reservations_result[0]['count'] > 0:
+                logger.warning(
+                    f"Propiedad {propiedad_id} tiene reservas confirmadas entre {check_in} y {check_out}")
                 return False
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Error verificando disponibilidad: {str(e)}")
             return False
@@ -118,43 +224,39 @@ class ReservationService:
         check_out: date
     ) -> Decimal:
         """
-        Calcula el precio total de una reserva basado en el calendario de disponibilidad.
-        
+        Calcula el precio total de una reserva basado en la tabla property_availability.
+
         Args:
             propiedad_id: ID de la propiedad
             check_in: Fecha de entrada
             check_out: Fecha de salida
-            
+
         Returns:
             Precio total de la reserva
         """
         try:
-            # Sumar precios del calendario de disponibilidad
+            # Sumar precios de la tabla de disponibilidad
             query = """
-                SELECT COALESCE(SUM(precio_noche), 0) as total
-                FROM calendario_disponibilidad
+                SELECT COALESCE(SUM(price_per_night), 0) as total
+                FROM propiedad_disponibilidad
                 WHERE propiedad_id = $1
-                AND fecha >= $2
-                AND fecha < $3
+                AND dia >= $2
+                AND dia < $3
                 AND disponible = TRUE
             """
-            
+
             result = await execute_query(query, propiedad_id, check_in, check_out)
-            
+
             if result and result[0]['total']:
                 return Decimal(str(result[0]['total']))
             else:
-                # Si no hay calendario, usar precio base de la propiedad
-                prop_query = "SELECT precio_base FROM propiedad WHERE id = $1"
-                prop_result = await execute_query(prop_query, propiedad_id)
-                
-                if prop_result:
-                    num_nights = (check_out - check_in).days
-                    precio_base = Decimal(str(prop_result[0].get('precio_base', 100)))
-                    return precio_base * num_nights
-                
-                return Decimal('0')
-                
+                # Si no hay disponibilidad configurada, usar precio por defecto
+                # La tabla propiedad no tiene precio_base, usar precio estándar
+                num_nights = (check_out - check_in).days
+                # $100 por noche por defecto
+                precio_default = Decimal('100.00')
+                return precio_default * num_nights
+
         except Exception as e:
             logger.error(f"Error calculando precio: {str(e)}")
             return Decimal('0')
@@ -171,13 +273,13 @@ class ReservationService:
     ) -> Dict[str, Any]:
         """
         Crea una nueva reserva.
-        
+
         Proceso:
         1. Verificar disponibilidad en PostgreSQL
         2. Calcular precio total
         3. Crear la reserva en PostgreSQL
         4. Registrar evento en Cassandra
-        
+
         Args:
             propiedad_id: ID de la propiedad
             huesped_id: ID del huésped
@@ -186,7 +288,7 @@ class ReservationService:
             num_huespedes: Número de huéspedes
             metodo_pago_id: ID del método de pago
             comentarios: Comentarios especiales
-            
+
         Returns:
             Diccionario con success, message, y datos de la reserva
         """
@@ -197,91 +299,98 @@ class ReservationService:
                     "success": False,
                     "error": "La fecha de entrada no puede ser en el pasado"
                 }
-            
+
             if check_out <= check_in:
                 return {
                     "success": False,
                     "error": "La fecha de salida debe ser posterior a la fecha de entrada"
                 }
-            
+
             # Verificar que la propiedad existe
             prop_result = await execute_query(
                 "SELECT id, nombre, capacidad FROM propiedad WHERE id = $1",
                 propiedad_id
             )
-            
+
             if not prop_result:
                 return {
                     "success": False,
                     "error": f"Propiedad con ID {propiedad_id} no existe"
                 }
-            
+
             propiedad = prop_result[0]
-            
+
             # Verificar capacidad
             if num_huespedes > propiedad['capacidad']:
                 return {
                     "success": False,
                     "error": f"La propiedad tiene capacidad para {propiedad['capacidad']} huéspedes, solicitaste {num_huespedes}"
                 }
-            
+
             # Verificar disponibilidad
             is_available = await self._check_availability(propiedad_id, check_in, check_out)
-            
+
             if not is_available:
                 return {
                     "success": False,
                     "error": "La propiedad no está disponible en las fechas seleccionadas"
                 }
-            
+
             # Calcular precio total
             total_price = await self._calculate_total_price(propiedad_id, check_in, check_out)
-            
+
             # Obtener estado "Confirmada"
             estado_result = await execute_query(
                 "SELECT id FROM estado_reserva WHERE nombre = 'Confirmada'"
             )
-            
+
             if not estado_result:
                 return {
                     "success": False,
                     "error": "No se encontró el estado 'Confirmada' en la base de datos"
                 }
-            
+
             estado_id = estado_result[0]['id']
-            
+
             # Crear la reserva
             pool = await get_client()
             async with pool.acquire() as conn:
                 async with conn.transaction():
                     query = """
                         INSERT INTO reserva (
-                            propiedad_id, huesped_id, fecha_inicio, fecha_fin,
-                            num_huespedes, precio_total, metodo_pago_id,
-                            estado_reserva_id, comentarios
+                            propiedad_id, huesped_id, fecha_check_in, fecha_check_out,
+                            monto_final, estado_reserva_id
                         )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                        RETURNING id, fecha_creacion
+                        VALUES ($1, $2, $3, $4, $5, $6)
+                        RETURNING id
                     """
-                    
+
                     result = await conn.fetchrow(
                         query,
                         propiedad_id,
                         huesped_id,
                         check_in,
                         check_out,
-                        num_huespedes,
                         total_price,
-                        metodo_pago_id,
-                        estado_id,
-                        comentarios
+                        estado_id
                     )
-                    
+
                     reserva_id = result['id']
-                    fecha_creacion = result['fecha_creacion']
-                    
+                    # Usar fecha actual ya que no retornamos fecha_creacion
+                    fecha_creacion = date.today()
+
                     logger.info(f"Reserva {reserva_id} creada exitosamente")
-            
+
+                    # Marcar fechas como no disponibles en la tabla de disponibilidad
+                    try:
+                        await self._mark_dates_unavailable(propiedad_id, check_in, check_out)
+                        logger.info(
+                            f"Fechas marcadas como no disponibles para propiedad {propiedad_id}")
+                    except Exception as e:
+                        logger.warning(
+                            f"Error marcando fechas como no disponibles: {str(e)}")
+                        # No fallar la reserva por esto
+
             # Registrar evento en Cassandra (async, no bloquear si falla)
             await self._log_event_to_cassandra(
                 reserva_id=reserva_id,
@@ -295,9 +404,9 @@ class ReservationService:
                     "precio_total": str(total_price)
                 }
             )
-            
+
             num_nights = (check_out - check_in).days
-            
+
             return {
                 "success": True,
                 "message": "Reserva creada exitosamente",
@@ -316,7 +425,7 @@ class ReservationService:
                     "comentarios": comentarios
                 }
             }
-            
+
         except Exception as e:
             logger.error(f"Error creando reserva: {str(e)}")
             return {
@@ -331,11 +440,11 @@ class ReservationService:
     ) -> Dict[str, Any]:
         """
         Obtiene las reservas de un huésped.
-        
+
         Args:
             huesped_id: ID del huésped
             include_cancelled: Si incluir reservas canceladas
-            
+
         Returns:
             Diccionario con success y lista de reservas
         """
@@ -361,14 +470,14 @@ class ReservationService:
                 JOIN pais pa ON c.pais_id = pa.id
                 WHERE r.huesped_id = $1
             """
-            
+
             if not include_cancelled:
                 query += " AND er.nombre NOT IN ('Cancelada', 'Rechazada')"
-            
+
             query += " ORDER BY r.fecha_inicio DESC"
-            
+
             results = await execute_query(query, huesped_id)
-            
+
             reservations = []
             for row in results:
                 num_nights = (row['fecha_fin'] - row['fecha_inicio']).days
@@ -387,13 +496,13 @@ class ReservationService:
                     "fecha_creacion": row['fecha_creacion'].isoformat(),
                     "comentarios": row['comentarios']
                 })
-            
+
             return {
                 "success": True,
                 "reservations": reservations,
                 "total": len(reservations)
             }
-            
+
         except Exception as e:
             logger.error(f"Error obteniendo reservas: {str(e)}")
             return {
@@ -406,10 +515,10 @@ class ReservationService:
     async def get_reservation(self, reserva_id: int) -> Dict[str, Any]:
         """
         Obtiene los detalles de una reserva específica.
-        
+
         Args:
             reserva_id: ID de la reserva
-            
+
         Returns:
             Diccionario con success y datos de la reserva
         """
@@ -442,18 +551,18 @@ class ReservationService:
                 LEFT JOIN metodo_pago mp ON r.metodo_pago_id = mp.id
                 WHERE r.id = $1
             """
-            
+
             result = await execute_query(query, reserva_id)
-            
+
             if not result:
                 return {
                     "success": False,
                     "error": f"Reserva con ID {reserva_id} no encontrada"
                 }
-            
+
             row = result[0]
             num_nights = (row['fecha_fin'] - row['fecha_inicio']).days
-            
+
             return {
                 "success": True,
                 "reservation": {
@@ -481,7 +590,7 @@ class ReservationService:
                     "comentarios": row['comentarios']
                 }
             }
-            
+
         except Exception as e:
             logger.error(f"Error obteniendo reserva: {str(e)}")
             return {
@@ -497,12 +606,12 @@ class ReservationService:
     ) -> Dict[str, Any]:
         """
         Cancela una reserva.
-        
+
         Args:
             reserva_id: ID de la reserva
             huesped_id: ID del huésped (para verificar ownership)
             reason: Razón de la cancelación
-            
+
         Returns:
             Diccionario con success y message
         """
@@ -514,48 +623,48 @@ class ReservationService:
                 JOIN estado_reserva er ON r.estado_reserva_id = er.id
                 WHERE r.id = $1 AND r.huesped_id = $2
             """
-            
+
             result = await execute_query(verify_query, reserva_id, huesped_id)
-            
+
             if not result:
                 return {
                     "success": False,
                     "error": "Reserva no encontrada o no te pertenece"
                 }
-            
+
             reserva = result[0]
-            
+
             # Verificar que no esté ya cancelada
             if reserva['estado'] in ['Cancelada', 'Rechazada']:
                 return {
                     "success": False,
                     "error": f"La reserva ya está {reserva['estado'].lower()}"
                 }
-            
+
             # Obtener ID del estado "Cancelada"
             estado_result = await execute_query(
                 "SELECT id FROM estado_reserva WHERE nombre = 'Cancelada'"
             )
-            
+
             if not estado_result:
                 return {
                     "success": False,
                     "error": "No se encontró el estado 'Cancelada' en la base de datos"
                 }
-            
+
             estado_id = estado_result[0]['id']
-            
+
             # Actualizar la reserva
             update_query = """
                 UPDATE reserva
                 SET estado_reserva_id = $1, comentarios = COALESCE(comentarios || ' | Cancelación: ' || $2, $2)
                 WHERE id = $3
             """
-            
+
             await execute_command(update_query, estado_id, reason or "Sin razón especificada", reserva_id)
-            
+
             logger.info(f"Reserva {reserva_id} cancelada exitosamente")
-            
+
             # Registrar evento en Cassandra
             await self._log_event_to_cassandra(
                 reserva_id=reserva_id,
@@ -566,12 +675,12 @@ class ReservationService:
                 check_out=reserva['fecha_fin'],
                 metadata={"reason": reason or "Sin razón especificada"}
             )
-            
+
             return {
                 "success": True,
                 "message": "Reserva cancelada exitosamente"
             }
-            
+
         except Exception as e:
             logger.error(f"Error cancelando reserva: {str(e)}")
             return {
@@ -587,12 +696,12 @@ class ReservationService:
     ) -> Dict[str, Any]:
         """
         Obtiene la disponibilidad de una propiedad en un rango de fechas.
-        
+
         Args:
             propiedad_id: ID de la propiedad
             start_date: Fecha inicio del rango
             end_date: Fecha fin del rango
-            
+
         Returns:
             Diccionario con fechas disponibles y no disponibles
         """
@@ -605,23 +714,23 @@ class ReservationService:
                 AND fecha <= $3
                 ORDER BY fecha
             """
-            
+
             results = await execute_query(query, propiedad_id, start_date, end_date)
-            
+
             available_dates = []
             unavailable_dates = []
-            
+
             for row in results:
                 date_info = {
                     "fecha": row['fecha'].isoformat(),
                     "precio": float(row['precio_noche'])
                 }
-                
+
                 if row['disponible']:
                     available_dates.append(date_info)
                 else:
                     unavailable_dates.append(date_info)
-            
+
             return {
                 "success": True,
                 "propiedad_id": propiedad_id,
@@ -631,7 +740,7 @@ class ReservationService:
                 "unavailable_dates": unavailable_dates,
                 "total_days": (end_date - start_date).days + 1
             }
-            
+
         except Exception as e:
             logger.error(f"Error obteniendo disponibilidad: {str(e)}")
             return {

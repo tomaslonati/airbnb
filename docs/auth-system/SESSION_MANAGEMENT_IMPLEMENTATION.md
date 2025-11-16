@@ -8,7 +8,7 @@ Successfully implemented Redis-based session management for the Airbnb CLI authe
 
 ### 🎯 Requirements Met
 
-- ✅ **Session TTL**: 90 seconds (1.5 minutes) as requested
+- ✅ **Session TTL**: 1 hour (3600 seconds) as requested
 - ✅ **Auto-refresh**: Sliding window - each activity extends session by 90s
 - ✅ **Redis as source of truth**: All session validation checks Redis first
 - ✅ **Token storage**: Global variable `current_session_token` in CLI
@@ -149,9 +149,9 @@ user:{user_id}:sessions      -> SET of active session tokens
 
 Every time a session is accessed via `get_session()` or `validate_session()`:
 - The `last_activity` timestamp is updated
-- The Redis TTL is reset to 90 seconds
+- The Redis TTL is reset to 1 hour
 - This creates a sliding window: session stays alive with regular use
-- 90 seconds of inactivity → automatic expiration
+- 1 hour of inactivity → automatic expiration
 
 ### 2. Multi-Session Support
 
@@ -243,9 +243,9 @@ This script demonstrates:
    ```
 
 2. Login with credentials
-   - Note the "Sesión creada (TTL: 90 segundos con auto-refresh)" message
+   - Note the "Sesión creada (TTL: 1 hora con auto-refresh)" message
 
-3. Use the menu options within 90 seconds
+3. Use the menu options within 1 hour
    - Each action refreshes the session TTL
 
 4. Select "Ver sesiones activas" to see active sessions
@@ -262,12 +262,12 @@ This script demonstrates:
 
 Configured in `services/session.py`:
 ```python
-# Global instance with 90 second TTL
+# Global instance with 1 hour TTL
 session_manager = SessionManager(session_ttl=90)
 ```
 
 To change the TTL, modify this value. Common options:
-- `90` - 1.5 minutes (current setting)
+- `90` - 3600 seconds (current setting)
 - `300` - 5 minutes
 - `3600` - 1 hour
 - `86400` - 24 hours
@@ -291,7 +291,7 @@ REDIS_URL=redis://localhost:6379
    - URL-safe encoding
 
 2. **Session Expiration**
-   - Automatic expiration after 90 seconds of inactivity
+   - Automatic expiration after 1 hour of inactivity
    - No manual cleanup needed (Redis TTL handles it)
 
 3. **Token Storage**
@@ -414,7 +414,7 @@ docker run -d -p 6379:6379 redis
 
 Redis session management is now fully implemented and tested. The system provides:
 - ✅ Persistent sessions in Redis
-- ✅ 90-second TTL with auto-refresh
+- ✅ 1-hour TTL with auto-refresh
 - ✅ Session validation before every command
 - ✅ Multi-session support
 - ✅ List active sessions

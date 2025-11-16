@@ -121,7 +121,7 @@ async def handle_login(auth_service: AuthService) -> UserProfile:
 
         # Store the session token
         set_session_token(result.session_token)
-        typer.echo("🔑 Sesión creada (TTL: 90 segundos con auto-refresh)")
+        typer.echo("🔑 Sesión creada (TTL: 1 hora con auto-refresh)")
 
         return result.user_profile
     else:

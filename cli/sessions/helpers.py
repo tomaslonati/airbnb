@@ -29,7 +29,7 @@ async def validate_session_or_expire(auth_service: AuthService) -> bool:
     is_valid = await auth_service.check_session_validity()
 
     if not is_valid:
-        typer.echo("\n⚠️  Tu sesión ha expirado (90 segundos de inactividad)")
+        typer.echo("\n⚠️  Tu sesión ha expirado (1 hora de inactividad)")
         typer.echo("Por favor inicia sesión nuevamente\n")
         clear_session()
         return False

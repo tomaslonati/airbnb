@@ -319,5 +319,5 @@ class SessionManager:
         return count
 
 
-# Global instance with default TTL (90 seconds)
-session_manager = SessionManager(session_ttl=90)
+# Global instance with default TTL (1 hour = 3600 seconds)
+session_manager = SessionManager(session_ttl=3600)

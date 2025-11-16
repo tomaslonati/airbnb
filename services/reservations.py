@@ -21,10 +21,32 @@ class ReservationService:
     - Registrar eventos en Cassandra
     - Validar disponibilidad
     - Calcular precios
+    - Gestionar comunidades host-huésped en Neo4j
     """
 
     def __init__(self):
+        # Inicialización lazy del servicio Neo4j para evitar dependencias circulares
+        self._neo4j_service = None
         logger.info("ReservationService inicializado")
+
+    @property
+    def neo4j_service(self):
+        """Lazy loading del servicio Neo4j"""
+        if self._neo4j_service is None:
+            try:
+                from services.neo4j_reservations import Neo4jReservationService
+                self._neo4j_service = Neo4jReservationService()
+            except ImportError as e:
+                logger.warning(
+                    f"No se pudo importar Neo4jReservationService: {e}")
+                self._neo4j_service = None
+        return self._neo4j_service
+
+    def close(self):
+        """Cierra las conexiones de servicios externos"""
+        if self._neo4j_service:
+            self._neo4j_service.close()
+            self._neo4j_service = None
 
     async def _log_event_to_cassandra(
         self,
@@ -308,7 +330,7 @@ class ReservationService:
 
             # Verificar que la propiedad existe
             prop_result = await execute_query(
-                "SELECT id, nombre, capacidad FROM propiedad WHERE id = $1",
+                "SELECT id, nombre, capacidad, anfitrion_id FROM propiedad WHERE id = $1",
                 propiedad_id
             )
 
@@ -404,6 +426,35 @@ class ReservationService:
                     "precio_total": str(total_price)
                 }
             )
+
+            # Crear/actualizar relación host-guest en Neo4j para análisis de comunidades
+            try:
+                if self.neo4j_service:
+                    neo4j_result = await self.neo4j_service.create_host_guest_interaction(
+                        host_user_id=propiedad['anfitrion_id'],
+                        guest_user_id=huesped_id,
+                        reservation_id=reserva_id,
+                        reservation_date=check_in,
+                        property_id=propiedad_id
+                    )
+
+                    if neo4j_result.get('success'):
+                        total_interactions = neo4j_result['total_interactions']
+                        logger.info(
+                            f"Relación Neo4j actualizada. Total interacciones: {total_interactions}")
+
+                        if neo4j_result.get('is_community'):
+                            logger.info(
+                                f"🏘️ ¡Nueva comunidad detectada! Host {propiedad['anfitrion_id']} - "
+                                f"Guest {huesped_id} con {total_interactions} interacciones"
+                            )
+                    else:
+                        logger.warning(
+                            f"Error en relación Neo4j: {neo4j_result.get('error')}")
+
+            except Exception as e:
+                logger.warning(
+                    f"Error creando relación Neo4j (reserva aún exitosa): {str(e)}")
 
             num_nights = (check_out - check_in).days
 

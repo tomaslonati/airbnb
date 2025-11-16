@@ -5,10 +5,15 @@ Comandos del CLI usando Typer - Versión Interactiva.
 import typer
 import asyncio
 from typing import Optional
+from datetime import datetime, date
 from services.auth import AuthService
 from services.user import UserService
 from services.mongo_host import MongoHostService
+from services.reservations import ReservationService
 from utils.logging import get_logger, configure_logging
+
+# Importar módulos CLI de features
+# from cli.reservations.commands import handle_reservation_management
 
 # Configurar logging al importar
 configure_logging()
@@ -68,6 +73,10 @@ async def interactive_mode():
                     await show_user_profile(current_user_session)
                 elif action == "properties":
                     await handle_properties_menu(current_user_session)
+                elif action == "availability":
+                    await handle_availability_management(current_user_session)
+                elif action == "reservations":
+                    await handle_reservation_management(current_user_session)
                 elif action == "mongo_stats":
                     await show_mongo_stats(current_user_session)
                 elif action == "exit":
@@ -120,7 +129,11 @@ async def show_main_menu(user_profile):
     # Agregar opciones específicas por rol
     if user_profile.rol in ['ANFITRION', 'AMBOS']:
         options.insert(-2, "🏠 Gestionar mis propiedades")
+        options.insert(-2, "📅 Gestionar disponibilidad de propiedades")
         options.insert(-2, "📊 Ver estadísticas MongoDB")
+    
+    if user_profile.rol in ['HUESPED', 'AMBOS']:
+        options.insert(-2, "📅 Gestionar mis reservas")
 
     for i, option in enumerate(options, 1):
         typer.echo(f"{i}. {option}")
@@ -133,8 +146,12 @@ async def show_main_menu(user_profile):
                     return "profile"
                 elif "Cerrar sesión" in options[choice-1]:
                     return "logout"
-                elif "propiedades" in options[choice-1]:
+                elif "Gestionar mis propiedades" in options[choice-1]:
                     return "properties"
+                elif "disponibilidad de propiedades" in options[choice-1]:
+                    return "availability"
+                elif "Gestionar mis reservas" in options[choice-1]:
+                    return "reservations"
                 elif "estadísticas MongoDB" in options[choice-1]:
                     return "mongo_stats"
                 elif "Salir" in options[choice-1]:
@@ -1284,6 +1301,610 @@ def delete_property(
             typer.echo(f"❌ Error: {result['error']}")
     
     asyncio.run(_delete())
+
+
+async def handle_availability_management(user_profile):
+    """Gestiona la disponibilidad de propiedades para anfitriones."""
+    # Verificar que el usuario sea anfitrión
+    if user_profile.rol not in ['ANFITRION', 'AMBOS']:
+        typer.echo("❌ Solo los anfitriones pueden gestionar disponibilidad")
+        typer.echo("Presiona Enter para continuar...")
+        input()
+        return
+
+    reservation_service = ReservationService()
+    anfitrion_id = user_profile.anfitrion_id
+
+    while True:
+        typer.echo("\n📅 GESTIÓN DE DISPONIBILIDAD")
+        typer.echo("=" * 50)
+        typer.echo("1. 📊 Ver calendario de disponibilidad")
+        typer.echo("2. 🚫 Bloquear fechas")
+        typer.echo("3. ✅ Habilitar fechas")
+        typer.echo("4. 🔍 Verificar disponibilidad")
+        typer.echo("5. 📈 Ver estadísticas de disponibilidad")
+        typer.echo("6. ⬅️  Volver al menú principal")
+
+        try:
+            choice = typer.prompt("Selecciona una opción (1-6)", type=int)
+
+            if choice == 1:
+                await show_availability_calendar_interactive(reservation_service, anfitrion_id)
+            elif choice == 2:
+                await block_property_dates_interactive(reservation_service, anfitrion_id)
+            elif choice == 3:
+                await unblock_property_dates_interactive(reservation_service, anfitrion_id)
+            elif choice == 4:
+                await check_availability_interactive(reservation_service, anfitrion_id)
+            elif choice == 5:
+                await show_availability_stats_interactive(reservation_service, anfitrion_id)
+            elif choice == 6:
+                break
+            else:
+                typer.echo("❌ Opción inválida. Por favor selecciona entre 1 y 6.")
+
+        except ValueError:
+            typer.echo("❌ Por favor ingresa un número válido.")
+        except KeyboardInterrupt:
+            typer.echo("\n👋 Regresando al menú principal...")
+            break
+        except Exception as e:
+            typer.echo(f"❌ Error inesperado: {str(e)}")
+            logger.error("Error en gestión de disponibilidad", error=str(e))
+
+
+async def handle_reservation_management(user_profile):
+    """Gestiona las reservas según el rol del usuario."""
+    reservation_service = ReservationService()
+
+    if user_profile.rol in ['HUESPED', 'AMBOS']:
+        await handle_guest_reservations(reservation_service, user_profile)
+    elif user_profile.rol == 'ANFITRION':
+        await handle_host_reservations(reservation_service, user_profile)
+
+
+async def handle_guest_reservations(reservation_service, user_profile):
+    """Gestiona las reservas como huésped."""
+    huesped_id = user_profile.huesped_id
+
+    while True:
+        typer.echo("\n📅 GESTIÓN DE RESERVAS")
+        typer.echo("=" * 50)
+        typer.echo(f"👤 Huésped: {user_profile.email} (ID: {huesped_id})")
+        typer.echo("-" * 50)
+        typer.echo("1. 📋 Ver mis reservas")
+        typer.echo("2. ➕ Crear nueva reserva")
+        typer.echo("3. 📝 Ver detalles de una reserva")
+        typer.echo("4. ❌ Cancelar reserva")
+        typer.echo("5. 🔍 Ver disponibilidad de una propiedad")
+        typer.echo("6. ⬅️  Volver al menú principal")
+
+        try:
+            choice = typer.prompt("Selecciona una opción (1-6)", type=int)
+
+            if choice == 1:
+                await show_guest_reservations(reservation_service, huesped_id)
+            elif choice == 2:
+                await create_reservation_interactive(reservation_service, huesped_id)
+            elif choice == 3:
+                await show_reservation_details_interactive(reservation_service, huesped_id)
+            elif choice == 4:
+                await cancel_reservation_interactive(reservation_service, huesped_id)
+            elif choice == 5:
+                await check_property_availability_interactive(reservation_service)
+            elif choice == 6:
+                break
+            else:
+                typer.echo("❌ Opción inválida. Por favor selecciona entre 1 y 6.")
+
+        except ValueError:
+            typer.echo("❌ Por favor ingresa un número válido.")
+        except KeyboardInterrupt:
+            typer.echo("\n👋 Regresando al menú principal...")
+            break
+        except Exception as e:
+            typer.echo(f"❌ Error inesperado: {str(e)}")
+            logger.error("Error en gestión de reservas", error=str(e))
+
+
+async def handle_host_reservations(reservation_service, user_profile):
+    """Gestiona las reservas como anfitrión."""
+    anfitrion_id = user_profile.anfitrion_id
+
+    while True:
+        typer.echo("\n📅 GESTIÓN DE RESERVAS - ANFITRIÓN")
+        typer.echo("=" * 50)
+        typer.echo(f"🏠 Anfitrión: {user_profile.email} (ID: {anfitrion_id})")
+        typer.echo("-" * 50)
+        typer.echo("1. 📋 Ver reservas de mis propiedades")
+        typer.echo("2. 📝 Ver detalles de una reserva")
+        typer.echo("3. ✅ Confirmar reserva")
+        typer.echo("4. ❌ Cancelar reserva")
+        typer.echo("5. ⬅️  Volver al menú principal")
+
+        try:
+            choice = typer.prompt("Selecciona una opción (1-5)", type=int)
+
+            if choice == 1:
+                await show_host_reservations(reservation_service, anfitrion_id)
+            elif choice == 2:
+                await show_reservation_details_interactive(reservation_service, None, anfitrion_id)
+            elif choice == 3:
+                await confirm_reservation_interactive(reservation_service, anfitrion_id)
+            elif choice == 4:
+                await cancel_reservation_interactive(reservation_service, None, anfitrion_id)
+            elif choice == 5:
+                break
+            else:
+                typer.echo("❌ Opción inválida. Por favor selecciona entre 1 y 5.")
+
+        except ValueError:
+            typer.echo("❌ Por favor ingresa un número válido.")
+        except KeyboardInterrupt:
+            typer.echo("\n👋 Regresando al menú principal...")
+            break
+        except Exception as e:
+            typer.echo(f"❌ Error inesperado: {str(e)}")
+            logger.error("Error en gestión de reservas de anfitrión", error=str(e))
+
+
+# ===== FUNCIONES DE DISPONIBILIDAD =====
+
+async def show_availability_calendar_interactive(reservation_service, anfitrion_id):
+    """Muestra un resumen del calendario de disponibilidad."""
+    from db.postgres import execute_query
+
+    try:
+        typer.echo("\n📊 CALENDARIO DE DISPONIBILIDAD")
+        typer.echo("=" * 50)
+
+        property_id = typer.prompt("🏠 ID de la propiedad", type=int)
+
+        # Validar propiedad del anfitrión
+        from services.properties import PropertyService
+        prop_service = PropertyService()
+        properties_result = await prop_service.list_properties_by_host(anfitrion_id)
+
+        if not properties_result.get('success', False):
+            typer.echo("❌ Error obteniendo propiedades del anfitrión")
+            typer.echo("Presiona Enter para continuar...")
+            input()
+            return
+
+        if not any(p['id'] == property_id for p in properties_result.get('properties', [])):
+            typer.echo("❌ No tienes permisos para gestionar esta propiedad")
+            typer.echo("Presiona Enter para continuar...")
+            input()
+            return
+
+        # Obtener disponibilidad próxima
+        query = """
+            SELECT 
+                dia,
+                disponible,
+                price_per_night,
+                CASE 
+                    WHEN disponible = true THEN 'Disponible'
+                    ELSE 'Bloqueada'
+                END as estado
+            FROM propiedad_disponibilidad 
+            WHERE propiedad_id = $1 
+            AND dia >= CURRENT_DATE 
+            AND dia <= CURRENT_DATE + INTERVAL '30 days'
+            ORDER BY dia
+            LIMIT 30
+        """
+
+        results = await execute_query(query, property_id)
+
+        if results:
+            typer.echo(f"\n📅 Próximos 30 días para propiedad {property_id}:")
+            typer.echo("-" * 60)
+            typer.echo(f"{'Fecha':<12} {'Estado':<12} {'Precio/noche':<15}")
+            typer.echo("-" * 60)
+
+            for row in results:
+                fecha = row['dia'].strftime("%Y-%m-%d")
+                estado = "✅ Disponible" if row['disponible'] else "❌ Bloqueada"
+                precio = f"${row['price_per_night']}" if row['price_per_night'] else "No configurado"
+                typer.echo(f"{fecha:<12} {estado:<12} {precio:<15}")
+        else:
+            typer.echo(f"\n📅 No hay disponibilidad configurada para la propiedad {property_id}")
+            typer.echo("💡 Tip: Use el script setup_availability.py para configurar disponibilidad inicial")
+
+    except Exception as e:
+        typer.echo(f"❌ Error: {str(e)}")
+
+    typer.echo("\nPresiona Enter para continuar...")
+    input()
+
+
+async def block_property_dates_interactive(reservation_service, anfitrion_id):
+    """Bloquea fechas de una propiedad de forma interactiva."""
+    try:
+        typer.echo("\n🚫 BLOQUEAR FECHAS")
+        typer.echo("=" * 50)
+
+        property_id = typer.prompt("🏠 ID de la propiedad", type=int)
+
+        # Validar propiedad del anfitrión
+        from services.properties import PropertyService
+        prop_service = PropertyService()
+        properties_result = await prop_service.list_properties_by_host(anfitrion_id)
+
+        if not properties_result.get('success', False):
+            typer.echo("❌ Error obteniendo propiedades del anfitrión")
+            typer.echo("Presiona Enter para continuar...")
+            input()
+            return
+
+        if not any(p['id'] == property_id for p in properties_result.get('properties', [])):
+            typer.echo("❌ No tienes permisos para gestionar esta propiedad")
+            typer.echo("Presiona Enter para continuar...")
+            input()
+            return
+
+        start_date_str = typer.prompt("📅 Fecha inicio (YYYY-MM-DD)")
+        end_date_str = typer.prompt("📅 Fecha fin (YYYY-MM-DD)")
+
+        try:
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+
+            if end_date <= start_date:
+                typer.echo("❌ La fecha fin debe ser posterior a la fecha inicio")
+                typer.echo("Presiona Enter para continuar...")
+                input()
+                return
+
+            # Bloquear fechas
+            await reservation_service._mark_dates_unavailable(property_id, start_date, end_date)
+
+            num_days = (end_date - start_date).days
+            typer.echo(f"\n✅ {num_days} fechas bloqueadas exitosamente")
+            typer.echo(f"🏠 Propiedad: {property_id}")
+            typer.echo(f"📅 Período: {start_date} a {end_date}")
+
+        except ValueError:
+            typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
+
+    except Exception as e:
+        typer.echo(f"❌ Error: {str(e)}")
+
+    typer.echo("\nPresiona Enter para continuar...")
+    input()
+
+
+async def unblock_property_dates_interactive(reservation_service, anfitrion_id):
+    """Habilita fechas de una propiedad de forma interactiva."""
+    try:
+        typer.echo("\n✅ HABILITAR FECHAS")
+        typer.echo("=" * 50)
+        
+        property_id = typer.prompt("🏠 ID de la propiedad", type=int)
+        
+        # Validar propiedad del anfitrión
+        from services.properties import PropertyService
+        prop_service = PropertyService()
+        properties_result = await prop_service.list_properties_by_host(anfitrion_id)
+        
+        if not properties_result.get('success', False):
+            typer.echo("❌ Error obteniendo propiedades del anfitrión")
+            typer.echo("Presiona Enter para continuar...")
+            input()
+            return
+        
+        if not any(p['id'] == property_id for p in properties_result.get('properties', [])):
+            typer.echo("❌ No tienes permisos para gestionar esta propiedad")
+            typer.echo("Presiona Enter para continuar...")
+            input()
+            return
+        
+        start_date_str = typer.prompt("📅 Fecha inicio (YYYY-MM-DD)")
+        end_date_str = typer.prompt("📅 Fecha fin (YYYY-MM-DD)")
+        
+        price_input = typer.prompt("💰 Precio por noche (Enter para usar $100 por defecto)", default="")
+        price_per_night = None
+        if price_input.strip():
+            try:
+                price_per_night = float(price_input)
+            except ValueError:
+                typer.echo("❌ Precio inválido, usando precio por defecto")
+        
+        try:
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+            
+            if end_date <= start_date:
+                typer.echo("❌ La fecha fin debe ser posterior a la fecha inicio")
+                typer.echo("Presiona Enter para continuar...")
+                input()
+                return
+            
+            # Habilitar fechas
+            await reservation_service._mark_dates_available(property_id, start_date, end_date, price_per_night)
+            
+            num_days = (end_date - start_date).days
+            price_display = f"${price_per_night}/noche" if price_per_night else "$100/noche (por defecto)"
+            typer.echo(f"\n✅ {num_days} fechas habilitadas exitosamente")
+            typer.echo(f"🏠 Propiedad: {property_id}")
+            typer.echo(f"📅 Período: {start_date} a {end_date}")
+            typer.echo(f"💰 Precio: {price_display}")
+            
+        except ValueError:
+            typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
+            
+    except Exception as e:
+        typer.echo(f"❌ Error: {str(e)}")
+    
+    typer.echo("\nPresiona Enter para continuar...")
+    input()
+
+
+async def check_availability_interactive(reservation_service, anfitrion_id):
+    """Verifica disponibilidad de una propiedad en un rango de fechas."""
+    try:
+        typer.echo("\n🔍 VERIFICAR DISPONIBILIDAD")
+        typer.echo("=" * 50)
+        
+        property_id = typer.prompt("🏠 ID de la propiedad", type=int)
+        start_date_str = typer.prompt("📅 Fecha inicio (YYYY-MM-DD)")
+        end_date_str = typer.prompt("📅 Fecha fin (YYYY-MM-DD)")
+        
+        try:
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+            
+            if end_date <= start_date:
+                typer.echo("❌ La fecha fin debe ser posterior a la fecha inicio")
+                typer.echo("Presiona Enter para continuar...")
+                input()
+                return
+            
+            # Verificar disponibilidad
+            is_available = await reservation_service._check_availability(property_id, start_date, end_date)
+            
+            num_days = (end_date - start_date).days
+            typer.echo(f"\n📊 RESULTADO DE VERIFICACIÓN")
+            typer.echo("-" * 30)
+            typer.echo(f"🏠 Propiedad: {property_id}")
+            typer.echo(f"📅 Período: {start_date} a {end_date}")
+            typer.echo(f"📆 Días: {num_days}")
+            
+            if is_available:
+                typer.echo(f"✅ Estado: DISPONIBLE")
+                # Obtener precio total si está disponible
+                from decimal import Decimal
+                total_price = await reservation_service._calculate_price_for_period(property_id, start_date, end_date)
+                if total_price and total_price > Decimal('0'):
+                    typer.echo(f"💰 Precio total: ${total_price}")
+                    typer.echo(f"💰 Precio promedio por noche: ${total_price / num_days}")
+            else:
+                typer.echo(f"❌ Estado: NO DISPONIBLE")
+                typer.echo("🚫 La propiedad no está disponible en esas fechas")
+            
+        except ValueError:
+            typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
+            
+    except Exception as e:
+        typer.echo(f"❌ Error: {str(e)}")
+    
+    typer.echo("\nPresiona Enter para continuar...")
+    input()
+
+
+async def show_availability_stats_interactive(reservation_service, anfitrion_id):
+    """Muestra estadísticas de disponibilidad para las propiedades del anfitrión."""
+    from db.postgres import execute_query
+    
+    try:
+        typer.echo("\n📈 ESTADÍSTICAS DE DISPONIBILIDAD")
+        typer.echo("=" * 50)
+        
+        # Obtener estadísticas generales por propiedad
+        query = """
+            SELECT 
+                p.id as propiedad_id,
+                p.nombre,
+                COUNT(pd.id) as dias_configurados,
+                COUNT(CASE WHEN pd.disponible = true THEN 1 END) as dias_disponibles,
+                COUNT(CASE WHEN pd.disponible = false THEN 1 END) as dias_bloqueados,
+                AVG(pd.price_per_night) as precio_promedio,
+                MIN(pd.price_per_night) as precio_minimo,
+                MAX(pd.price_per_night) as precio_maximo
+            FROM propiedad p
+            LEFT JOIN propiedad_disponibilidad pd ON p.id = pd.propiedad_id
+            WHERE p.anfitrion_id = $1
+            AND pd.dia >= CURRENT_DATE
+            GROUP BY p.id, p.nombre
+            ORDER BY p.id
+        """
+        
+        results = await execute_query(query, anfitrion_id)
+        
+        if results:
+            typer.echo(f"📊 Resumen de disponibilidad para anfitrión {anfitrion_id}:")
+            typer.echo("-" * 80)
+            
+            for row in results:
+                typer.echo(f"\n🏠 Propiedad: {row['nombre']} (ID: {row['propiedad_id']})")
+                typer.echo(f"   📅 Días configurados: {row['dias_configurados']}")
+                typer.echo(f"   ✅ Días disponibles: {row['dias_disponibles']}")
+                typer.echo(f"   ❌ Días bloqueados: {row['dias_bloqueados']}")
+                
+                if row['precio_promedio']:
+                    typer.echo(f"   💰 Precio promedio: ${row['precio_promedio']:.2f}/noche")
+                    typer.echo(f"   💰 Rango de precios: ${row['precio_minimo']:.2f} - ${row['precio_maximo']:.2f}")
+                
+                # Calcular proyección de ingresos (días disponibles * precio promedio)
+                if row['dias_disponibles'] and row['precio_promedio']:
+                    ingresos_potenciales = row['dias_disponibles'] * float(row['precio_promedio'])
+                    typer.echo(f"   💎 Ingresos potenciales: ${ingresos_potenciales:.2f}")
+        else:
+            typer.echo("📅 No hay datos de disponibilidad configurados")
+            typer.echo("💡 Tip: Use el script setup_availability.py para configurar disponibilidad inicial")
+        
+    except Exception as e:
+        typer.echo(f"❌ Error: {str(e)}")
+    
+    typer.echo("\nPresiona Enter para continuar...")
+    input()
+
+
+# ===== FUNCIONES DE RESERVAS =====
+
+async def show_guest_reservations(reservation_service, huesped_id):
+    """Muestra las reservas del huésped."""
+    # Esta función necesita ser implementada según la lógica de reservas
+    typer.echo("🚧 Función en desarrollo - Ver reservas de huésped")
+    typer.echo("Presiona Enter para continuar...")
+    input()
+
+
+async def create_reservation_interactive(reservation_service, huesped_id):
+    """Crea una nueva reserva de forma interactiva."""
+    try:
+        typer.echo("\n➕ CREAR NUEVA RESERVA")
+        typer.echo("=" * 50)
+        
+        property_id = typer.prompt("🏠 ID de la propiedad", type=int)
+        
+        typer.echo("\n📅 Fechas (formato: YYYY-MM-DD)")
+        check_in_str = typer.prompt("   Fecha de entrada")
+        check_out_str = typer.prompt("   Fecha de salida")
+        
+        guests = typer.prompt("👥 Número de huéspedes [1]", default=1, type=int)
+        special_requests = typer.prompt("💬 Comentarios especiales (Enter para omitir) [", default="")
+        
+        try:
+            check_in = datetime.strptime(check_in_str, "%Y-%m-%d").date()
+            check_out = datetime.strptime(check_out_str, "%Y-%m-%d").date()
+            
+            if check_out <= check_in:
+                typer.echo("❌ La fecha de salida debe ser posterior a la fecha de entrada")
+                typer.echo("Presiona Enter para continuar...")
+                input()
+                return
+            
+            typer.echo("\n🔄 Creando reserva...")
+            
+            # Crear la reserva usando el servicio
+            result = await reservation_service.create_reservation(
+                propiedad_id=property_id,
+                huesped_id=huesped_id,
+                check_in=check_in,
+                check_out=check_out,
+                guests=guests,
+                special_requests=special_requests or None
+            )
+            
+            if result.get('success'):
+                reserva_id = result.get('reserva_id')
+                total_price = result.get('total_price')
+                typer.echo(f"\n✅ Reserva creada exitosamente!")
+                typer.echo(f"🆔 ID de reserva: {reserva_id}")
+                typer.echo(f"🏠 Propiedad: {property_id}")
+                typer.echo(f"📅 Fechas: {check_in} a {check_out}")
+                typer.echo(f"👥 Huéspedes: {guests}")
+                typer.echo(f"💰 Total: ${total_price}")
+                if special_requests:
+                    typer.echo(f"💬 Comentarios: {special_requests}")
+            else:
+                error_msg = result.get('error', 'Error desconocido')
+                typer.echo(f"❌ Error: {error_msg}")
+                
+        except ValueError:
+            typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
+            
+    except Exception as e:
+        typer.echo(f"❌ Error inesperado: {str(e)}")
+    
+    typer.echo("\nPresiona Enter para continuar...")
+    input()
+
+
+async def show_reservation_details_interactive(reservation_service, huesped_id=None, anfitrion_id=None):
+    """Muestra detalles de una reserva específica."""
+    # Esta función necesita ser implementada según la lógica de reservas
+    typer.echo("🚧 Función en desarrollo - Ver detalles de reserva")
+    typer.echo("Presiona Enter para continuar...")
+    input()
+
+
+async def cancel_reservation_interactive(reservation_service, huesped_id=None, anfitrion_id=None):
+    """Cancela una reserva de forma interactiva."""
+    # Esta función necesita ser implementada según la lógica de reservas
+    typer.echo("🚧 Función en desarrollo - Cancelar reserva")
+    typer.echo("Presiona Enter para continuar...")
+    input()
+
+
+async def check_property_availability_interactive(reservation_service):
+    """Verifica disponibilidad de una propiedad sin restricciones de anfitrión."""
+    try:
+        typer.echo("\n🔍 VERIFICAR DISPONIBILIDAD")
+        typer.echo("=" * 50)
+        
+        property_id = typer.prompt("🏠 ID de la propiedad", type=int)
+        start_date_str = typer.prompt("📅 Fecha inicio (YYYY-MM-DD)")
+        end_date_str = typer.prompt("📅 Fecha fin (YYYY-MM-DD)")
+        
+        try:
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+            
+            if end_date <= start_date:
+                typer.echo("❌ La fecha fin debe ser posterior a la fecha inicio")
+                typer.echo("Presiona Enter para continuar...")
+                input()
+                return
+            
+            # Verificar disponibilidad
+            is_available = await reservation_service._check_availability(property_id, start_date, end_date)
+            
+            num_days = (end_date - start_date).days
+            typer.echo(f"\n📊 RESULTADO DE VERIFICACIÓN")
+            typer.echo("-" * 30)
+            typer.echo(f"🏠 Propiedad: {property_id}")
+            typer.echo(f"📅 Período: {start_date} a {end_date}")
+            typer.echo(f"📆 Días: {num_days}")
+            
+            if is_available:
+                typer.echo(f"✅ Estado: DISPONIBLE")
+                # Obtener precio total si está disponible
+                from decimal import Decimal
+                total_price = await reservation_service._calculate_price_for_period(property_id, start_date, end_date)
+                if total_price and total_price > Decimal('0'):
+                    typer.echo(f"💰 Precio total: ${total_price}")
+                    typer.echo(f"💰 Precio promedio por noche: ${total_price / num_days}")
+            else:
+                typer.echo(f"❌ Estado: NO DISPONIBLE")
+                typer.echo("🚫 La propiedad no está disponible en esas fechas")
+            
+        except ValueError:
+            typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
+            
+    except Exception as e:
+        typer.echo(f"❌ Error: {str(e)}")
+    
+    typer.echo("\nPresiona Enter para continuar...")
+    input()
+
+
+async def show_host_reservations(reservation_service, anfitrion_id):
+    """Muestra las reservas de las propiedades del anfitrión."""
+    # Esta función necesita ser implementada según la lógica de reservas
+    typer.echo("🚧 Función en desarrollo - Ver reservas de anfitrión")
+    typer.echo("Presiona Enter para continuar...")
+    input()
+
+
+async def confirm_reservation_interactive(reservation_service, anfitrion_id):
+    """Confirma una reserva de forma interactiva."""
+    # Esta función necesita ser implementada según la lógica de reservas
+    typer.echo("🚧 Función en desarrollo - Confirmar reserva")
+    typer.echo("Presiona Enter para continuar...")
+    input()
 
 
 if __name__ == "__main__":

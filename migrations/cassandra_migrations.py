@@ -166,10 +166,7 @@ class Migration005CreatePropertiesByCity(BaseMigration):
         await cassandra.execute_query(create_table_query)
         logger.info("Tabla 'properties_by_city_and_capacity' creada exitosamente.")
         
-        # -----------------------------------------------------------------
-        # 2. EL DML (INSERT) - (¡La parte que faltaba!)
-        # Poblamos la tabla con los datos de PostgreSQL que obtuvimos.
-        # -----------------------------------------------------------------
+        
         logger.info("Poblando 'properties_by_city_and_capacity' con datos de Postgres...")
         
         inserts = [

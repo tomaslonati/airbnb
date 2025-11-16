@@ -8,6 +8,9 @@ from datetime import datetime, date
 from typing import Dict, Any
 from utils.logging import get_logger
 
+# Importamos el módulo de Neo4j para el modelado de grafos
+from db import neo4j 
+
 logger = get_logger(__name__)
 
 
@@ -16,6 +19,32 @@ class ReservationService:
 
     def __init__(self):
         pass
+
+    async def _update_neo4j_recurrent_booking(self, user_id: str, city_name: str):
+        """
+        Crea/Actualiza la relación User-[:BOOKED_IN]->City, incrementando el contador.
+        Esto cumple con el HU: Usuarios que regresaron a la misma ciudad (>=2 reservas).
+        """
+        query = """
+            // Asegura que el nodo User exista (aunque la app ya debería crearlo)
+            MERGE (u:User {id: $user_id}) 
+            
+            // Asegura que el nodo City exista (creado en la migración M003)
+            MERGE (c:City {name: $city_name})
+            
+            // Crea la relación o la actualiza
+            MERGE (u)-[r:BOOKED_IN]->(c)
+            ON CREATE SET r.count = 1
+            ON MATCH SET r.count = r.count + 1
+        """
+        
+        # Asumimos que el módulo de Neo4j ya tiene un cliente funcional
+        await neo4j.execute_write_transaction(
+            query,
+            {"user_id": user_id, "city_name": city_name}
+        )
+        logger.info("Relación de reserva recurrente actualizada en Neo4j.")
+
 
     async def create_reservation(
         self,
@@ -26,21 +55,8 @@ class ReservationService:
     ) -> Dict[str, Any]:
         """
         FUNCIÓN DE EJEMPLO: Crea una nueva reserva.
-
-        En una implementación real:
-        1. Verificaría disponibilidad en PostgreSQL
-        2. Crearía la reserva en PostgreSQL
-        3. Registraría el evento en Cassandra para histórico
-        4. Manejaría transacciones y rollback
-
-        Args:
-            property_id: ID de la propiedad
-            user_id: ID del usuario
-            check_in: Fecha de entrada
-            check_out: Fecha de salida
-
-        Returns:
-            Datos de la reserva creada (simulados)
+        
+        Añadida la lógica de doble escritura a Neo4j.
         """
         reservation_id = str(uuid.uuid4())
 
@@ -50,6 +66,20 @@ class ReservationService:
             property_id=property_id,
             user_id=user_id
         )
+
+        # 1. Simulación de creación en PostgreSQL (esto debería ser la transacción real)
+        # La implementación real debería obtener el nombre de la ciudad desde el property_id.
+        # Por ahora, usaremos una ciudad de ejemplo para el grafo.
+        city_name = "Buenos Aires" 
+        
+        # 2. Registra el evento en Cassandra para histórico (se haría con el módulo de Cassandra)
+        # 3. Lógica de DOBLE ESCRITURA a Neo4j (el caso de uso 9)
+        try:
+            await self._update_neo4j_recurrent_booking(user_id, city_name)
+        except Exception as e:
+            # En un sistema real, esto es un warning. La reserva debe continuar.
+            logger.error(f"Fallo en la escritura a Neo4j (reservas recurrentes): {e}")
+
 
         # Datos simulados de respuesta
         reservation_data = {

@@ -15,25 +15,28 @@ async def show_auth_menu() -> str:
     Display the authentication menu and return the selected action.
 
     Returns:
-        Action string: "login", "register", or "exit"
+        Action string: "login", "register", "test_cases", or "exit"
     """
     typer.echo("\n🔐 AUTENTICACIÓN")
     typer.echo("-" * 20)
     typer.echo("1. 🔑 Iniciar Sesión")
     typer.echo("2. 📝 Registrarse")
-    typer.echo("3. ❌ Salir")
+    typer.echo("3. 🧪 Testear casos de uso")
+    typer.echo("4. ❌ Salir")
 
     while True:
         try:
-            choice = typer.prompt("Selecciona una opción (1-3)", type=int)
+            choice = typer.prompt("Selecciona una opción (1-4)", type=int)
             if choice == 1:
                 return "login"
             elif choice == 2:
                 return "register"
             elif choice == 3:
+                return "test_cases"
+            elif choice == 4:
                 return "exit"
             else:
-                typer.echo("❌ Opción inválida. Selecciona 1, 2 o 3.")
+                typer.echo("❌ Opción inválida. Selecciona 1, 2, 3 o 4.")
         except ValueError:
             typer.echo("❌ Por favor ingresa un número válido.")
 

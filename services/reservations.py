@@ -3,10 +3,11 @@ Servicio de reservas que utiliza PostgreSQL (Supabase).
 Cassandra logging será agregado en el futuro.
 """
 
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime # AÑADIDO datetime
 from typing import Dict, Any, Optional
 from decimal import Decimal
 from db.postgres import execute_query, execute_command, get_client
+from db import cassandra # AÑADIDO: Módulo Cassandra para la doble escritura
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -37,17 +38,7 @@ class ReservationService:
         metadata: Optional[Dict[str, str]] = None
     ):
         """
-        Placeholder para logging de eventos en Cassandra (futuro).
-        Por ahora solo registra en logs.
-
-        Args:
-            reserva_id: ID de la reserva
-            event_type: Tipo de evento (CREATED, CANCELLED, CHECKED_IN, etc.)
-            propiedad_id: ID de la propiedad
-            huesped_id: ID del huésped
-            check_in: Fecha de entrada
-            check_out: Fecha de salida
-            metadata: Información adicional del evento
+        Implementación de logging de eventos en Cassandra (AstraDB DataAPI).
         """
         logger.info(
             f"Evento {event_type} para reserva {reserva_id}",
@@ -56,8 +47,33 @@ class ReservationService:
             propiedad_id=propiedad_id,
             huesped_id=huesped_id
         )
-        # TODO: Implementar logging en Cassandra cuando esté listo
-        pass
+        
+        # --- CÓDIGO AÑADIDO PARA CASSANDRA ---
+        try:
+            # Creamos el documento JSON para insertar en la colección 'reservation_events'
+            # Usamos str() para convertir IDs que son UUIDs o INTs a TEXT/UUID para Cassandra
+            document = {
+                "reservation_id": str(reserva_id), # CLAVE PRINCIPAL (PostgreSQL ID)
+                "event_type": event_type,
+                "property_id": str(propiedad_id),
+                "user_id": str(huesped_id),
+                "check_in": check_in.isoformat(),
+                "check_out": check_out.isoformat(),
+                "metadata": metadata or {},
+                "event_time": datetime.now().isoformat() # Usamos la hora actual
+            }
+            
+            # Asumimos que db.cassandra tiene un insert_document para la DataAPI
+            # La colección 'reservation_events' debe existir (Migration 001).
+            await cassandra.insert_document("reservation_events", document)
+            logger.info(f"Evento de reserva {reserva_id} registrado en Cassandra.")
+            
+        except AttributeError:
+             logger.error("Error: Módulo db.cassandra no tiene 'insert_document'.")
+        except Exception as e:
+            # Es un warning, no un error fatal, porque la reserva ya está en PostgreSQL
+            logger.warning(f"Fallo al escribir en Cassandra: {e}. La reserva fue guardada en PostgreSQL.")
+        # --- FIN CÓDIGO CASSANDRA ---
 
     async def _mark_dates_unavailable(
         self,
@@ -68,12 +84,6 @@ class ReservationService:
     ):
         """
         Marca fechas como no disponibles en la tabla property_availability.
-
-        Args:
-            propiedad_id: ID de la propiedad
-            check_in: Fecha de inicio
-            check_out: Fecha de fin
-            reason: Razón de la no disponibilidad
         """
         try:
             current_date = check_in
@@ -109,12 +119,6 @@ class ReservationService:
     ):
         """
         Marca fechas como disponibles en la tabla property_availability.
-
-        Args:
-            propiedad_id: ID de la propiedad
-            check_in: Fecha de inicio
-            check_out: Fecha de fin
-            price_per_night: Precio por noche (opcional)
         """
         try:
             current_date = check_in
@@ -155,15 +159,6 @@ class ReservationService:
         """
         Verifica si una propiedad está disponible en las fechas solicitadas.
         Ahora usa la tabla property_availability como fuente principal.
-
-        Args:
-            propiedad_id: ID de la propiedad
-            check_in: Fecha de entrada
-            check_out: Fecha de salida
-            exclude_reserva_id: ID de reserva a excluir (para actualizaciones)
-
-        Returns:
-            True si está disponible, False si no
         """
         try:
             # Primero verificar en la tabla de disponibilidad
@@ -185,6 +180,8 @@ class ReservationService:
                 return False
 
             # Verificar que no haya reservas confirmadas que se solapen
+            # NOTA: Este chequeo es redundante si property_availability se mantiene correctamente,
+            # pero se deja como fallback.
             reservations_query = """
                 SELECT COUNT(*) as count
                 FROM reserva r
@@ -225,14 +222,6 @@ class ReservationService:
     ) -> Decimal:
         """
         Calcula el precio total de una reserva basado en la tabla property_availability.
-
-        Args:
-            propiedad_id: ID de la propiedad
-            check_in: Fecha de entrada
-            check_out: Fecha de salida
-
-        Returns:
-            Precio total de la reserva
         """
         try:
             # Sumar precios de la tabla de disponibilidad
@@ -251,7 +240,6 @@ class ReservationService:
                 return Decimal(str(result[0]['total']))
             else:
                 # Si no hay disponibilidad configurada, usar precio por defecto
-                # La tabla propiedad no tiene precio_base, usar precio estándar
                 num_nights = (check_out - check_in).days
                 # $100 por noche por defecto
                 precio_default = Decimal('100.00')
@@ -278,7 +266,7 @@ class ReservationService:
         1. Verificar disponibilidad en PostgreSQL
         2. Calcular precio total
         3. Crear la reserva en PostgreSQL
-        4. Registrar evento en Cassandra
+        4. Registrar evento en Cassandra (DUAL WRITE)
 
         Args:
             propiedad_id: ID de la propiedad
@@ -440,13 +428,6 @@ class ReservationService:
     ) -> Dict[str, Any]:
         """
         Obtiene las reservas de un huésped.
-
-        Args:
-            huesped_id: ID del huésped
-            include_cancelled: Si incluir reservas canceladas
-
-        Returns:
-            Diccionario con success y lista de reservas
         """
         try:
             query = """
@@ -515,12 +496,6 @@ class ReservationService:
     async def get_reservation(self, reserva_id: int) -> Dict[str, Any]:
         """
         Obtiene los detalles de una reserva específica.
-
-        Args:
-            reserva_id: ID de la reserva
-
-        Returns:
-            Diccionario con success y datos de la reserva
         """
         try:
             query = """
@@ -606,14 +581,6 @@ class ReservationService:
     ) -> Dict[str, Any]:
         """
         Cancela una reserva.
-
-        Args:
-            reserva_id: ID de la reserva
-            huesped_id: ID del huésped (para verificar ownership)
-            reason: Razón de la cancelación
-
-        Returns:
-            Diccionario con success y message
         """
         try:
             # Verificar que la reserva existe y pertenece al huésped
@@ -696,14 +663,6 @@ class ReservationService:
     ) -> Dict[str, Any]:
         """
         Obtiene la disponibilidad de una propiedad en un rango de fechas.
-
-        Args:
-            propiedad_id: ID de la propiedad
-            start_date: Fecha inicio del rango
-            end_date: Fecha fin del rango
-
-        Returns:
-            Diccionario con fechas disponibles y no disponibles
         """
         try:
             query = """

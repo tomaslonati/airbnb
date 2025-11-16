@@ -196,3 +196,5 @@ class Migration005CreatePropertiesByCity(BaseMigration):
         """Eliminar tabla properties_by_city_and_capacity."""
         await cassandra.execute_query("DROP TABLE IF EXISTS properties_by_city_and_capacity;")
         logger.info("Tabla 'properties_by_city_and_capacity' eliminada")
+        
+

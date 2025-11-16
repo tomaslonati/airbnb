@@ -15,6 +15,24 @@ from cli.auth.commands import app as auth_app
 from cli.properties.commands import app as properties_app
 from cli.reservations.commands import app as reservations_app, handle_reservation_management
 
+# Importar gestión de sesiones
+from cli.sessions import (
+    validate_session_or_expire,
+    refresh_session_after_action,
+    restore_previous_session,
+    show_auth_menu,
+    show_main_menu,
+    handle_login,
+    handle_register,
+    handle_logout,
+    show_user_profile,
+    show_active_sessions,
+    get_current_user,
+    set_current_user,
+    get_session_token,
+    has_active_session
+)
+
 # Configurar logging al importar
 configure_logging()
 logger = get_logger(__name__)
@@ -28,9 +46,6 @@ app = typer.Typer(
 app.add_typer(auth_app, name="auth", help="Comandos de autenticación")
 app.add_typer(properties_app, name="properties", help="Gestión de propiedades")
 app.add_typer(reservations_app, name="reservations", help="Gestión de reservas")
-
-# Variable global para almacenar el usuario actual
-current_user_session = None
 
 
 @app.callback(invoke_without_command=True)
@@ -46,226 +61,74 @@ def main(ctx: typer.Context):
 
 async def interactive_mode():
     """Modo interactivo principal del CLI."""
-    global current_user_session
-    
     typer.echo("🏠 BIENVENIDO AL SISTEMA AIRBNB")
     typer.echo("=" * 50)
-    
+
     auth_service = AuthService()
-    
+
+    # Intentar restaurar sesión previa si existe
+    if get_session_token():
+        await restore_previous_session(auth_service)
+
     # Loop principal del sistema
     while True:
         try:
-            if current_user_session is None:
+            current_user = get_current_user()
+
+            if current_user is None:
                 # No hay sesión activa - mostrar menú de autenticación
                 action = await show_auth_menu()
-                
+
                 if action == "login":
-                    current_user_session = await handle_login(auth_service)
+                    user_profile = await handle_login(auth_service)
+                    set_current_user(user_profile)
                 elif action == "register":
-                    current_user_session = await handle_register(auth_service)
+                    user_profile = await handle_register(auth_service)
+                    set_current_user(user_profile)
                 elif action == "exit":
                     typer.echo("👋 ¡Hasta luego!")
                     break
             else:
-                # Hay sesión activa - mostrar menú principal
-                action = await show_main_menu(current_user_session)
-                
+                # Hay sesión activa - verificar validez antes de mostrar menú
+                if not await validate_session_or_expire(auth_service):
+                    continue
+
+                # Sesión válida - mostrar menú principal
+                action = await show_main_menu(current_user)
+
+                # Verificar validez después de selección de menú
+                # (el usuario pudo haber esperado 90+ segundos en el menú)
+                if not await validate_session_or_expire(auth_service):
+                    continue
+
+                # Sesión válida - ejecutar acción y refrescar TTL
                 if action == "logout":
                     await handle_logout(auth_service)
-                    current_user_session = None
-                elif action == "profile":
-                    await show_user_profile(current_user_session)
-                elif action == "mongo_stats":
-                    await show_mongo_stats(current_user_session)
-                elif action == "properties":
-                    await handle_property_management(current_user_session)
-                elif action == "reservations":
-                    await handle_reservation_management(current_user_session)
                 elif action == "exit":
                     typer.echo("👋 ¡Hasta luego!")
                     break
-                
+                else:
+                    # Ejecutar acción según selección
+                    if action == "profile":
+                        await show_user_profile(current_user)
+                    elif action == "sessions":
+                        await show_active_sessions(auth_service)
+                    elif action == "mongo_stats":
+                        await show_mongo_stats(current_user)
+                    elif action == "properties":
+                        await handle_property_management(current_user)
+                    elif action == "reservations":
+                        await handle_reservation_management(current_user)
+
+                    # Refrescar sesión después de acción exitosa
+                    await refresh_session_after_action(auth_service)
+
         except KeyboardInterrupt:
             typer.echo("\n👋 ¡Hasta luego!")
             break
         except Exception as e:
             typer.echo(f"❌ Error inesperado: {str(e)}")
             logger.error("Error en modo interactivo", error=str(e))
-
-
-async def show_auth_menu():
-    """Muestra el menú de autenticación y retorna la acción seleccionada."""
-    typer.echo("\n🔐 AUTENTICACIÓN")
-    typer.echo("-" * 20)
-    typer.echo("1. 🔑 Iniciar Sesión")
-    typer.echo("2. 📝 Registrarse")
-    typer.echo("3. ❌ Salir")
-    
-    while True:
-        try:
-            choice = typer.prompt("Selecciona una opción (1-3)", type=int)
-            if choice == 1:
-                return "login"
-            elif choice == 2:
-                return "register"
-            elif choice == 3:
-                return "exit"
-            else:
-                typer.echo("❌ Opción inválida. Selecciona 1, 2 o 3.")
-        except ValueError:
-            typer.echo("❌ Por favor ingresa un número válido.")
-
-
-async def show_main_menu(user_profile):
-    """Muestra el menú principal según el tipo de usuario."""
-    typer.echo(f"\n🏠 MENÚ PRINCIPAL - {user_profile.nombre}")
-    typer.echo(f"👤 Rol: {user_profile.rol}")
-    typer.echo("-" * 40)
-    
-    options = [
-        "👤 Ver mi perfil",
-        "🚪 Cerrar sesión",
-        "❌ Salir del sistema"
-    ]
-    
-    # Agregar opciones específicas por rol
-    if user_profile.rol in ['ANFITRION', 'AMBOS']:
-        options.insert(-2, "📊 Ver estadísticas MongoDB")
-        options.insert(-2, "🏠 Gestionar mis propiedades")
-    
-    if user_profile.rol in ['HUESPED', 'AMBOS']:
-        options.insert(-2, "📅 Gestionar mis reservas")
-    
-    for i, option in enumerate(options, 1):
-        typer.echo(f"{i}. {option}")
-    
-    while True:
-        try:
-            choice = typer.prompt(f"Selecciona una opción (1-{len(options)})", type=int)
-            if 1 <= choice <= len(options):
-                if "perfil" in options[choice-1]:
-                    return "profile"
-                elif "Cerrar sesión" in options[choice-1]:
-                    return "logout"
-                elif "estadísticas MongoDB" in options[choice-1]:
-                    return "mongo_stats"
-                elif "propiedades" in options[choice-1]:
-                    return "properties"
-                elif "reservas" in options[choice-1]:
-                    return "reservations"
-                elif "Salir" in options[choice-1]:
-                    return "exit"
-            else:
-                typer.echo(f"❌ Opción inválida. Selecciona entre 1 y {len(options)}.")
-        except ValueError:
-            typer.echo("❌ Por favor ingresa un número válido.")
-
-
-async def handle_login(auth_service):
-    """Maneja el proceso de login interactivo."""
-    typer.echo("\n🔑 INICIAR SESIÓN")
-    typer.echo("=" * 30)
-    
-    email = typer.prompt("📧 Email")
-    password = typer.prompt("🔐 Contraseña", hide_input=True)
-    
-    typer.echo(f"\n🔄 Validando credenciales para {email}...")
-    
-    result = await auth_service.login(email, password)
-    
-    if result.success:
-        typer.echo(f"✅ {result.message}")
-        typer.echo(f"🎉 ¡Bienvenido/a {result.user_profile.nombre}!")
-        return result.user_profile
-    else:
-        typer.echo(f"❌ {result.message}")
-        typer.echo("Presiona Enter para continuar...")
-        input()
-        return None
-
-
-async def handle_register(auth_service):
-    """Maneja el proceso de registro interactivo."""
-    typer.echo("\n📝 REGISTRO DE NUEVO USUARIO")
-    typer.echo("=" * 40)
-    
-    email = typer.prompt("📧 Email")
-    password = typer.prompt("🔐 Contraseña", hide_input=True)
-    password_confirm = typer.prompt("🔐 Confirmar contraseña", hide_input=True)
-    
-    if password != password_confirm:
-        typer.echo("❌ Las contraseñas no coinciden.")
-        typer.echo("Presiona Enter para continuar...")
-        input()
-        return None
-    
-    nombre = typer.prompt("👤 Nombre completo")
-    
-    typer.echo("\n🎭 Selecciona tu rol:")
-    typer.echo("1. 🛏️  HUESPED - Solo reservar propiedades")
-    typer.echo("2. 🏠 ANFITRION - Solo publicar propiedades")
-    typer.echo("3. 🔄 AMBOS - Reservar y publicar propiedades")
-    
-    while True:
-        try:
-            rol_choice = typer.prompt("Selecciona rol (1-3)", type=int)
-            rol_map = {1: "HUESPED", 2: "ANFITRION", 3: "AMBOS"}
-            if rol_choice in rol_map:
-                rol = rol_map[rol_choice]
-                break
-            else:
-                typer.echo("❌ Opción inválida. Selecciona 1, 2 o 3.")
-        except ValueError:
-            typer.echo("❌ Por favor ingresa un número válido.")
-    
-    typer.echo(f"\n🔄 Registrando usuario {email} como {rol}...")
-    
-    result = await auth_service.register(email, password, rol, nombre)
-    
-    if result.success:
-        typer.echo(f"✅ {result.message}")
-        typer.echo(f"🎉 ¡Bienvenido/a {result.user_profile.nombre}!")
-        
-        if result.user_profile.rol in ['ANFITRION', 'AMBOS']:
-            typer.echo(f"🏠 Tu ID de anfitrión es: {result.user_profile.anfitrion_id}")
-            typer.echo("📝 Se ha creado tu documento en MongoDB para gestionar calificaciones")
-        
-        return result.user_profile
-    else:
-        typer.echo(f"❌ {result.message}")
-        typer.echo("Presiona Enter para continuar...")
-        input()
-        return None
-
-
-async def handle_logout(auth_service):
-    """Maneja el cierre de sesión."""
-    typer.echo("\n🚪 Cerrando sesión...")
-    result = await auth_service.logout()
-    typer.echo(f"✅ {result.message}")
-    typer.echo("Presiona Enter para continuar...")
-    input()
-
-
-async def show_user_profile(user_profile):
-    """Muestra el perfil completo del usuario."""
-    typer.echo("\n👤 MI PERFIL")
-    typer.echo("=" * 30)
-    typer.echo(f"📧 Email: {user_profile.email}")
-    typer.echo(f"👤 Nombre: {user_profile.nombre}")
-    typer.echo(f"🎭 Rol: {user_profile.rol}")
-    typer.echo(f"🆔 ID Usuario: {user_profile.user_id}")
-    
-    if user_profile.huesped_id:
-        typer.echo(f"🛏️  ID Huésped: {user_profile.huesped_id}")
-    if user_profile.anfitrion_id:
-        typer.echo(f"🏠 ID Anfitrión: {user_profile.anfitrion_id}")
-    
-    typer.echo(f"📅 Registro: {user_profile.fecha_registro}")
-    
-    typer.echo("\nPresiona Enter para continuar...")
-    input()
 
 
 async def show_mongo_stats(user_profile):

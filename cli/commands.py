@@ -491,13 +491,30 @@ async def create_property_interactive(user_profile, PropertyService):
     # Reglas opcionales
     typer.echo("\n📏 REGLAS DE LA PROPIEDAD (opcional):")
     typer.echo("1. No fumar, 2. No mascotas, 3. No fiestas, 4. Check-in 15pm-20pm")
-    reglas_input = typer.prompt("Ingresa IDs separados por coma (ej: 1,2) o presiona Enter para omitir", default="")
+    reglas_input = typer.prompt("Ingresa IDs separados por coma (ej: 1,2) ο presiona Enter para omitir", default="")
     regla_ids = None
     if reglas_input.strip():
         try:
             regla_ids = [int(x.strip()) for x in reglas_input.split(",")]
         except ValueError:
             typer.echo("⚠️ Reglas inválidas, se omitirán")
+
+    # Imágenes opcionales
+    typer.echo("\n🖼️  IMÁGENES DE LA PROPIEDAD (opcional):")
+    typer.echo("Ingresa URLs de imágenes separados por coma (ej: http://imagen1.jpg,http://imagen2.jpg)")
+    typer.echo("O presiona Enter para no agregar imágenes")
+    imagenes_input = typer.prompt("🖼️  URLs de imágenes", default="")
+    imagenes = None
+    if imagenes_input.strip():
+        try:
+            imagenes = [url.strip() for url in imagenes_input.split(",") if url.strip()]
+            if imagenes:
+                typer.echo(f"   ✅ {len(imagenes)} imágenes agregadas")
+                typer.echo("   📸 Imágenes:")
+                for i, img in enumerate(imagenes, 1):
+                    typer.echo(f"      {i}. {img}")
+        except Exception as e:
+            typer.echo("⚠️ Error procesando imágenes, se omitirán")
 
     # Crear propiedad
     typer.echo(f"\n🔄 Creando propiedad '{nombre}'...")
@@ -514,6 +531,7 @@ async def create_property_interactive(user_profile, PropertyService):
         amenities=amenity_ids,
         servicios=servicio_ids,
         reglas=regla_ids,
+        imagenes=imagenes,
         generar_calendario=True,
         dias_calendario=365
     )
@@ -577,6 +595,13 @@ async def view_property_details(PropertyService):
                 typer.echo(f"🕐 Check-in: {check_in}")
             if check_out:
                 typer.echo(f"🕐 Check-out: {check_out}")
+
+            # Mostrar imágenes
+            imagenes = prop.get('imagenes', [])
+            if imagenes:
+                typer.echo(f"🖼️  Imágenes ({len(imagenes)}):")
+                for i, img_url in enumerate(imagenes, 1):
+                    typer.echo(f"   {i}. {img_url}")
 
             # Mostrar amenities
             amenities = prop.get('amenities', [])
@@ -748,7 +773,27 @@ async def update_property_interactive(user_profile, PropertyService):
             reglas = [int(x.strip()) for x in reglas_input.split(",")]
             typer.echo(f"   ✅ {len(reglas)} reglas seleccionadas")
         except ValueError:
-            typer.echo("⚠️ Reglas inválidas, se mantendrán las actuales")
+            typer.echo("⚠️ Reglas inválidas, se mantendrán los actuales")
+
+    # IMÁGENES
+    typer.echo("\n🖼️ IMÁGENES:")
+    typer.echo("Opciones:")
+    typer.echo("  'R' - Reemplazar todas las imágenes")
+    typer.echo("  Enter - Mantener imágenes actuales")
+    imagenes_input = typer.prompt("   🖼️ Acción con imágenes", default="")
+    imagenes = None
+    if imagenes_input.upper() == 'R':
+        imagenes_uris = typer.prompt("   🖼️ Nuevas URLs de imágenes (separadas por coma)", default="")
+        if imagenes_uris.strip():
+            try:
+                imagenes = [url.strip() for url in imagenes_uris.split(",") if url.strip()]
+                typer.echo(f"   ✅ {len(imagenes)} nuevas imágenes")
+            except Exception as e:
+                typer.echo("⚠️ Error procesando imágenes, se mantendrán las actuales")
+                imagenes = None
+        else:
+            imagenes = []  # Vaciar imágenes
+            typer.echo("   ✅ Imágenes eliminadas")
 
     # Validar que haya algo que cambiar
     has_changes = any([
@@ -760,7 +805,8 @@ async def update_property_interactive(user_profile, PropertyService):
         horario_check_out is not None,
         amenities is not None,
         servicios is not None,
-        reglas is not None
+        reglas is not None,
+        imagenes is not None
     ])
 
     if not has_changes:
@@ -778,7 +824,8 @@ async def update_property_interactive(user_profile, PropertyService):
             horario_check_out=horario_check_out,
             amenities=amenities,
             servicios=servicios,
-            reglas=reglas
+            reglas=reglas,
+            imagenes=imagenes
         )
 
         if result["success"]:

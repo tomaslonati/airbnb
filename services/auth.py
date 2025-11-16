@@ -18,6 +18,9 @@ from utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Import SessionManager (will be defined after UserProfile)
+# from services.session import session_manager
+
 
 @dataclass
 class UserProfile:
@@ -38,6 +41,7 @@ class AuthResult:
     success: bool
     message: str
     user_profile: Optional[UserProfile] = None
+    session_token: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -54,9 +58,20 @@ class AuthService:
 
     def __init__(self):
         self.current_user: Optional[UserProfile] = None
+        self.current_session_token: Optional[str] = None
         self.neo4j_user_service = Neo4jUserService()
         self.mongo_host_service = MongoHostService()
+        # Lazy import to avoid circular dependency
+        self._session_manager = None
         logger.info("AuthService inicializado")
+
+    @property
+    def session_manager(self):
+        """Lazy load session manager to avoid circular imports"""
+        if self._session_manager is None:
+            from services.session import session_manager
+            self._session_manager = session_manager
+        return self._session_manager
 
     async def register(
         self,
@@ -130,14 +145,14 @@ class AuthService:
 
     async def login(self, email: str, password: str) -> AuthResult:
         """
-        Autentica un usuario existente.
+        Autentica un usuario existente y crea una sesión en Redis.
 
         Args:
             email: Correo electrónico del usuario
             password: Contraseña del usuario
 
         Returns:
-            AuthResult con el resultado de la operación
+            AuthResult con el resultado de la operación y el token de sesión
         """
         try:
             logger.info(f"Iniciando login para email: {email}")
@@ -156,13 +171,20 @@ class AuthService:
             # En producción, se verificaría contra Supabase Auth
             user_profile = await self._build_user_profile(user_data)
 
+            # Create session in Redis and get token
+            session_token = await self.session_manager.create_session(user_profile)
+
+            # Store in memory as well
             self.current_user = user_profile
-            logger.info(f"Login exitoso para: {email}")
+            self.current_session_token = session_token
+
+            logger.info(f"Login exitoso para: {email}, session token: {session_token[:8]}...")
 
             return AuthResult(
                 success=True,
                 message=f"✅ Bienvenido/a {user_profile.nombre or email}",
-                user_profile=user_profile
+                user_profile=user_profile,
+                session_token=session_token
             )
 
         except Exception as e:
@@ -175,7 +197,7 @@ class AuthService:
 
     async def logout(self) -> AuthResult:
         """
-        Cierra la sesión del usuario actual.
+        Cierra la sesión del usuario actual e invalida el token en Redis.
 
         Returns:
             AuthResult con el resultado de la operación
@@ -183,6 +205,12 @@ class AuthService:
         try:
             if self.current_user:
                 logger.info(f"Cerrando sesión para: {self.current_user.email}")
+
+                # Invalidate session in Redis if we have a token
+                if self.current_session_token:
+                    await self.session_manager.invalidate_session(self.current_session_token)
+                    self.current_session_token = None
+
                 self.current_user = None
 
             return AuthResult(
@@ -198,6 +226,100 @@ class AuthService:
                 error=str(e)
             )
 
+    async def restore_session(self, token: str) -> AuthResult:
+        """
+        Restaura una sesión desde un token almacenado en Redis.
+
+        Args:
+            token: Token de sesión a restaurar
+
+        Returns:
+            AuthResult indicando si la sesión se restauró exitosamente
+        """
+        try:
+            logger.info(f"Intentando restaurar sesión con token: {token[:8]}...")
+
+            user_profile = await self.session_manager.get_session(token)
+
+            if user_profile:
+                self.current_user = user_profile
+                self.current_session_token = token
+                logger.info(f"Sesión restaurada para: {user_profile.email}")
+
+                return AuthResult(
+                    success=True,
+                    message=f"✅ Sesión restaurada: {user_profile.nombre or user_profile.email}",
+                    user_profile=user_profile,
+                    session_token=token
+                )
+            else:
+                return AuthResult(
+                    success=False,
+                    message="❌ Sesión expirada o inválida",
+                    error="Session expired or invalid"
+                )
+
+        except Exception as e:
+            logger.error(f"Error restaurando sesión: {str(e)}")
+            return AuthResult(
+                success=False,
+                message=f"❌ Error restaurando sesión: {str(e)}",
+                error=str(e)
+            )
+
+    async def check_session_validity(self) -> bool:
+        """
+        Verifica si la sesión actual es válida SIN refrescar el TTL.
+
+        Use esto para validar antes de acciones sin extender la sesión.
+
+        Returns:
+            True si la sesión es válida, False si expiró
+        """
+        if not self.current_session_token:
+            return False
+
+        try:
+            user_profile = await self.session_manager.peek_session(self.current_session_token)
+            if user_profile:
+                return True
+            else:
+                # Session expired, clear local state
+                self.current_user = None
+                self.current_session_token = None
+                return False
+
+        except Exception as e:
+            logger.error(f"Error verificando sesión: {str(e)}")
+            return False
+
+    async def validate_session(self) -> bool:
+        """
+        Valida que la sesión actual siga siendo válida en Redis.
+        Actualiza el TTL si es válida (sliding window).
+
+        Returns:
+            True si la sesión es válida, False si expiró
+        """
+        if not self.current_session_token:
+            return False
+
+        try:
+            user_profile = await self.session_manager.get_session(self.current_session_token)
+            if user_profile:
+                # Session is still valid, update current_user
+                self.current_user = user_profile
+                return True
+            else:
+                # Session expired, clear local state
+                self.current_user = None
+                self.current_session_token = None
+                return False
+
+        except Exception as e:
+            logger.error(f"Error validando sesión: {str(e)}")
+            return False
+
     def get_current_user(self) -> Optional[UserProfile]:
         """
         Obtiene el usuario actualmente autenticado.
@@ -206,6 +328,23 @@ class AuthService:
             UserProfile del usuario actual o None si no hay sesión
         """
         return self.current_user
+
+    async def list_sessions(self) -> Optional[list]:
+        """
+        Lista todas las sesiones activas del usuario actual.
+
+        Returns:
+            Lista de sesiones activas o None si no hay usuario autenticado
+        """
+        if not self.current_user:
+            return None
+
+        try:
+            sessions = await self.session_manager.list_user_sessions(self.current_user.id)
+            return sessions
+        except Exception as e:
+            logger.error(f"Error listando sesiones: {str(e)}")
+            return []
 
     def is_authenticated(self) -> bool:
         """

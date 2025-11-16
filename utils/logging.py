@@ -18,6 +18,13 @@ def configure_logging():
         level=getattr(logging, app_config.log_level.upper())
     )
 
+    # Silenciar loggers verbosos de librerías externas
+    logging.getLogger('astrapy').setLevel(logging.WARNING)
+    logging.getLogger('httpx').setLevel(logging.WARNING)  
+    logging.getLogger('httpcore').setLevel(logging.WARNING)
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
+    logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
+    
     # Configuración de structlog
     structlog.configure(
         processors=[

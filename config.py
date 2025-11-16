@@ -19,6 +19,12 @@ class DatabaseConfig(BaseSettings):
     # AstraDB/Cassandra
     astra_db_token: str = os.getenv("ASTRA_DB_TOKEN", "")
     astra_db_endpoint: str = os.getenv("ASTRA_DB_ENDPOINT", "")
+    astra_db_keyspace: str = os.getenv("ASTRA_DB_KEYSPACE", "airbnb_metrics")
+    # Legacy Cassandra config (opcional)
+    cassandra_bundle_path: str = os.getenv("CASSANDRA_BUNDLE_PATH", "")
+    cassandra_username: str = os.getenv("CASSANDRA_USERNAME", "")
+    cassandra_password: str = os.getenv("CASSANDRA_PASSWORD", "")
+    cassandra_keyspace: str = os.getenv("CASSANDRA_KEYSPACE", "airbnb_ks")
 
     # Neo4j AuraDB
     neo4j_uri: str = os.getenv("NEO4J_URI", "")

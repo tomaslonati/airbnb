@@ -7,8 +7,16 @@ from typing import Optional, Any
 from config import db_config
 from utils.logging import get_logger
 from utils.retry import retry_on_connection_error
+import logging
 
+# Configurar logger para reducir logs verbosos
 logger = get_logger(__name__)
+
+# Desactivar logging verbose de astrapy y httpx
+logging.getLogger('astrapy').setLevel(logging.WARNING)
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('httpcore').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
 
 # Clientes globales
 _astra_client: Optional[DataAPIClient] = None
@@ -29,9 +37,9 @@ async def get_astra_client():
             db_config.astra_db_endpoint
         )
         
-        # Verificar conexión
+        # Verificar conexión silenciosamente
         collections = _astra_database.list_collection_names()
-        logger.info(f"Conectado a AstraDB. Colecciones: {collections}")
+        logger.info(f"✅ Conectado a AstraDB ({len(collections)} colecciones)")
 
     return _astra_database
 
@@ -73,7 +81,7 @@ async def insert_document(collection_name: str, document: dict):
     try:
         collection = await get_collection(collection_name)
         result = collection.insert_one(document)
-        logger.info(f"Documento insertado en '{collection_name}': {result.inserted_id}")
+        logger.debug(f"Documento insertado en '{collection_name}': {result.inserted_id}")
         return result
         
     except Exception as e:
@@ -92,7 +100,7 @@ async def find_documents(collection_name: str, filter_dict: dict = None, limit: 
             cursor = collection.find({}, limit=limit)
         
         documents = list(cursor)
-        logger.info(f"Encontrados {len(documents)} documentos en '{collection_name}'")
+        logger.debug(f"Encontrados {len(documents)} documentos en '{collection_name}'")
         return documents
         
     except Exception as e:

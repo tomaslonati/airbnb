@@ -2998,16 +2998,19 @@ async def handle_test_cases_menu():
         typer.echo("💡 Prueba funcionalidades sin necesidad de login")
         typer.echo("-" * 60)
         typer.echo("2. 📊 Caso 2: Promedio de rating por anfitrión (MongoDB)")
+        typer.echo("3. 🏠 Caso 3: Alojamientos en ciudad específica con capacidad >3 y wifi (Cassandra)")
         typer.echo("7. 🔐 Caso 7: Sesión de un huésped (1h) - Redis")
         typer.echo(
             "10. 🏘️  Caso 10: Comunidades host-huésped (>=3 interacciones)")
         typer.echo("0. ⬅️  Volver al menú principal")
 
         try:
-            choice = typer.prompt("Selecciona una opción (2, 7, 10, 0)", type=int)
+            choice = typer.prompt("Selecciona una opción (2, 3, 7, 10, 0)", type=int)
 
             if choice == 2:
                 await test_case_2_rating_averages()
+            elif choice == 3:
+                await test_case_3_property_search()
             elif choice == 7:
                 await test_case_7_guest_session()
             elif choice == 10:
@@ -3016,7 +3019,7 @@ async def handle_test_cases_menu():
                 break
             else:
                 typer.echo(
-                    "❌ Opción inválida. Por favor selecciona 2, 7, 10 o 0.")
+                    "❌ Opción inválida. Por favor selecciona 2, 3, 7, 10 o 0.")
 
         except ValueError:
             typer.echo("❌ Por favor ingresa un número válido.")
@@ -3146,6 +3149,220 @@ async def test_case_2_rating_averages():
     except Exception as e:
         typer.echo(f"❌ Error consultando MongoDB: {str(e)}")
         logger.error("Error en caso de uso 2", error=str(e))
+
+    typer.echo("\n" + "="*70)
+    typer.echo("Presiona Enter para continuar...")
+    input()
+
+
+async def test_case_3_property_search():
+    """Caso de uso 3: Búsqueda de alojamientos en ciudad específica con capacidad >3 y wifi usando Cassandra."""
+    try:
+        from db.cassandra import get_astra_client, create_collection, insert_document, find_documents
+        from datetime import datetime
+        import random
+
+        typer.echo("\n🏠 CASO DE USO 3: BÚSQUEDA DE ALOJAMIENTOS")
+        typer.echo("=" * 70)
+        typer.echo("🔍 Cassandra: Ciudad específica, capacidad >3 y wifi")
+
+        # Conectar a AstraDB/Cassandra
+        typer.echo("\n🔗 CONECTANDO A ASTRADB (CASSANDRA)...")
+        database = await get_astra_client()
+        collection_name = "property_search"
+
+        # Verificar/crear colección
+        try:
+            await create_collection(collection_name)
+            typer.echo(f"✅ Colección '{collection_name}' lista")
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                typer.echo(f"ℹ️  Usando colección existente '{collection_name}'")
+            else:
+                typer.echo(f"⚠️  Error: {e}")
+
+        # Generar datos de ejemplo si no existen
+        typer.echo(f"\n📊 GENERANDO DATOS DE EJEMPLO...")
+        
+        ciudades = ["Barcelona", "Madrid", "Valencia", "Sevilla", "Bilbao", "Granada", "Zaragoza"]
+        amenities_options = [
+            ["wifi", "parking", "pool"],
+            ["wifi", "gym", "balcony"], 
+            ["wifi", "parking", "kitchen"],
+            ["wifi", "air_conditioning", "pool"],
+            ["parking", "gym"],  # Sin wifi
+            ["wifi", "kitchen", "washer"],
+            ["pool", "balcony"],  # Sin wifi
+            ["wifi", "parking", "gym", "pool", "kitchen"]
+        ]
+
+        sample_properties = []
+        for i in range(15):
+            prop = {
+                "property_id": f"prop_{i+1:03d}",
+                "name": f"Apartamento {['Moderno', 'Acogedor', 'Luminoso', 'Espacioso', 'Céntrico'][i % 5]} {i+1}",
+                "city": ciudades[i % len(ciudades)],
+                "capacity": random.randint(1, 8),
+                "price_per_night": random.randint(45, 180),
+                "amenities": amenities_options[i % len(amenities_options)],
+                "host_id": f"host_{random.randint(1, 5):03d}",
+                "rating": round(random.uniform(3.5, 5.0), 1),
+                "created_at": datetime.utcnow().isoformat(),
+                "available": random.choice([True, True, False])  # 66% disponible
+            }
+            sample_properties.append(prop)
+
+        # Insertar propiedades de ejemplo
+        for prop in sample_properties:
+            try:
+                await insert_document(collection_name, prop)
+            except Exception as e:
+                # Puede fallar si ya existe, continuar
+                pass
+
+        typer.echo(f"   ✅ {len(sample_properties)} propiedades de ejemplo generadas")
+
+        # Mostrar criterios de búsqueda
+        typer.echo(f"\n🔍 CRITERIOS DE BÚSQUEDA:")
+        typer.echo(f"   🏙️  Ciudad específica (seleccionable)")
+        typer.echo(f"   👥 Capacidad > 3 personas")
+        typer.echo(f"   📶 Amenity: wifi incluido")
+
+        # Permitir al usuario elegir ciudad
+        typer.echo(f"\n🏙️  CIUDADES DISPONIBLES:")
+        for i, ciudad in enumerate(ciudades, 1):
+            typer.echo(f"   {i}. {ciudad}")
+
+        while True:
+            try:
+                ciudad_choice = typer.prompt(f"Selecciona ciudad (1-{len(ciudades)})", type=int)
+                if 1 <= ciudad_choice <= len(ciudades):
+                    ciudad_seleccionada = ciudades[ciudad_choice - 1]
+                    break
+                else:
+                    typer.echo(f"❌ Selecciona entre 1 y {len(ciudades)}")
+            except ValueError:
+                typer.echo("❌ Por favor ingresa un número válido")
+
+        typer.echo(f"\n🔍 BUSCANDO EN: {ciudad_seleccionada}")
+        typer.echo("=" * 50)
+
+        # Primero buscar por ciudad (ya que AstraDB no soporta operadores complejos como MongoDB)
+        city_filter = {"city": ciudad_seleccionada}
+
+        typer.echo(f"🔎 Ejecutando búsqueda en Cassandra...")
+        all_city_results = await find_documents(collection_name, city_filter, limit=100)
+
+        # Filtrar manualmente los resultados según nuestros criterios
+        filtered_results = []
+        for result in all_city_results:
+            capacity = result.get('capacity', 0)
+            amenities = result.get('amenities', [])
+            available = result.get('available', False)
+            
+            # Aplicar filtros: capacidad >3, tiene wifi, está disponible
+            if (capacity > 3 and 
+                'wifi' in amenities and 
+                available):
+                filtered_results.append(result)
+
+        typer.echo(f"   ✅ {len(all_city_results)} propiedades en {ciudad_seleccionada}")
+        typer.echo(f"   🔍 {len(filtered_results)} cumplen criterios (capacidad >3, wifi, disponible)")
+
+        # Mostrar resultados
+        if filtered_results:
+            typer.echo(f"\n🏠 {len(filtered_results)} ALOJAMIENTOS ENCONTRADOS:")
+            typer.echo("=" * 70)
+            typer.echo(f"{'ID':<8} {'Nombre':<25} {'Cap.':<4} {'Precio':<7} {'Rating':<7} {'Amenities'}")
+            typer.echo("=" * 70)
+
+            total_results = 0
+            precio_total = 0
+            rating_total = 0
+
+            for result in filtered_results:
+                prop_id = result.get('property_id', 'N/A')
+                nombre = result.get('name', 'Sin nombre')[:24]
+                capacidad = result.get('capacity', 0)
+                precio = result.get('price_per_night', 0)
+                rating = result.get('rating', 0)
+                amenities = result.get('amenities', [])
+                
+                amenities_str = ", ".join(amenities[:3])  # Mostrar primeros 3
+                if len(amenities) > 3:
+                    amenities_str += "..."
+
+                # Destacar wifi
+                wifi_indicator = "📶"
+
+                typer.echo(f"{prop_id:<8} {nombre:<25} {capacidad:<4} €{precio:<6} ⭐{rating:<6} {wifi_indicator} {amenities_str}")
+                
+                total_results += 1
+                precio_total += precio
+                rating_total += rating
+
+            if total_results > 0:
+                precio_promedio = precio_total / total_results
+                rating_promedio = rating_total / total_results
+
+                typer.echo("=" * 70)
+                typer.echo(f"📈 ESTADÍSTICAS DE RESULTADOS:")
+                typer.echo(f"   🏠 Total encontrados: {total_results}")
+                typer.echo(f"   💰 Precio promedio: €{precio_promedio:.2f}/noche")
+                typer.echo(f"   ⭐ Rating promedio: {rating_promedio:.1f}/5")
+                typer.echo(f"   🏙️  Ciudad: {ciudad_seleccionada}")
+                typer.echo(f"   ✅ Todos con wifi y capacidad >3")
+
+                # Mostrar distribución por capacidad
+                capacidades = {}
+                for result in filtered_results:
+                    cap = result.get('capacity', 0)
+                    capacidades[cap] = capacidades.get(cap, 0) + 1
+
+                if capacidades:
+                    typer.echo(f"\n👥 DISTRIBUCIÓN POR CAPACIDAD:")
+                    for cap in sorted(capacidades.keys()):
+                        typer.echo(f"   {cap} personas: {capacidades[cap]} propiedades")
+
+                # Mostrar algunos ejemplos de propiedades encontradas
+                typer.echo(f"\n🏠 EJEMPLOS DE PROPIEDADES ENCONTRADAS:")
+                for i, result in enumerate(filtered_results[:3], 1):
+                    typer.echo(f"   {i}. {result.get('name')} - €{result.get('price_per_night')}/noche")
+                    typer.echo(f"      Capacidad: {result.get('capacity')} personas")
+                    typer.echo(f"      Amenities: {', '.join(result.get('amenities', []))}")
+                    typer.echo(f"      Rating: ⭐{result.get('rating')}/5")
+                    typer.echo("")
+        else:
+            typer.echo(f"❌ No se encontraron alojamientos con los criterios:")
+            typer.echo(f"   🏙️  Ciudad: {ciudad_seleccionada}")
+            typer.echo(f"   👥 Capacidad > 3")
+            typer.echo(f"   📶 WiFi incluido")
+            typer.echo(f"   ✅ Disponible")
+
+        # Mostrar información técnica
+        typer.echo(f"\n🔧 INFORMACIÓN TÉCNICA:")
+        typer.echo(f"   🗄️  Base de datos: AstraDB (Cassandra)")
+        typer.echo(f"   📁 Colección: {collection_name}")
+        typer.echo(f"   🔍 Filtros aplicados:")
+        typer.echo(f"      • city = '{ciudad_seleccionada}'")
+        typer.echo(f"      • capacity > 3")
+        typer.echo(f"      • amenities contiene 'wifi'")
+        typer.echo(f"      • available = true")
+
+        # Mostrar todas las ciudades con datos para referencia
+        typer.echo(f"\n📊 RESUMEN POR CIUDADES:")
+        for ciudad in ciudades:
+            ciudad_filter = {"city": ciudad}
+            ciudad_docs = await find_documents(collection_name, ciudad_filter, limit=100)
+            con_wifi = len([d for d in ciudad_docs if 'wifi' in d.get('amenities', [])])
+            con_capacidad = len([d for d in ciudad_docs if d.get('capacity', 0) > 3])
+            disponibles = len([d for d in ciudad_docs if d.get('available', False)])
+            
+            typer.echo(f"   {ciudad:<12}: {len(ciudad_docs):2d} total, {con_wifi:2d} wifi, {con_capacidad:2d} cap>3, {disponibles:2d} disp.")
+
+    except Exception as e:
+        typer.echo(f"❌ Error en búsqueda con Cassandra: {str(e)}")
+        logger.error("Error en caso de uso 3", error=str(e))
 
     typer.echo("\n" + "="*70)
     typer.echo("Presiona Enter para continuar...")

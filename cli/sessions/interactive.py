@@ -64,6 +64,7 @@ async def show_main_menu(user_profile: UserProfile) -> str:
     if user_profile.rol in ['ANFITRION', 'AMBOS']:
         options.insert(-3, "📊 Ver estadísticas MongoDB")
         options.insert(-3, "🏠 Gestionar mis propiedades")
+        options.insert(-3, "📅 Gestionar disponibilidad de propiedades")
 
     if user_profile.rol in ['HUESPED', 'AMBOS']:
         options.insert(-3, "📅 Gestionar mis reservas")
@@ -83,9 +84,11 @@ async def show_main_menu(user_profile: UserProfile) -> str:
                     return "logout"
                 elif "estadísticas MongoDB" in options[choice-1]:
                     return "mongo_stats"
-                elif "propiedades" in options[choice-1]:
+                elif "Gestionar mis propiedades" in options[choice-1]:
                     return "properties"
-                elif "reservas" in options[choice-1]:
+                elif "disponibilidad de propiedades" in options[choice-1]:
+                    return "availability"
+                elif "Gestionar mis reservas" in options[choice-1]:
                     return "reservations"
                 elif "Salir" in options[choice-1]:
                     return "exit"

@@ -90,6 +90,171 @@ class PropertyService:
             logger.error(f"Error en validación de FKs: {e}")
             return False, f"Error al validar datos: {str(e)}"
 
+    async def get_available_cities(self) -> Dict[str, Any]:
+        """
+        Obtiene todas las ciudades disponibles.
+
+        Returns:
+            Dict con success=True y lista de ciudades, o error
+        """
+        try:
+            pool = await postgres.get_client()
+            ciudades = await pool.fetch(
+                """
+                SELECT id, nombre, cp, pais_id
+                FROM ciudad
+                ORDER BY id
+                """
+            )
+
+            ciudades_list = [dict(ciudad) for ciudad in ciudades]
+
+            logger.info(f"Ciudades disponibles obtenidas: {len(ciudades_list)}")
+            return {
+                "success": True,
+                "items": ciudades_list
+            }
+
+        except Exception as e:
+            logger.error(f"Error obteniendo ciudades: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "items": []
+            }
+
+    async def get_available_property_types(self) -> Dict[str, Any]:
+        """
+        Obtiene todos los tipos de propiedad disponibles.
+
+        Returns:
+            Dict con success=True y lista de tipos, o error
+        """
+        try:
+            pool = await postgres.get_client()
+            tipos = await pool.fetch(
+                """
+                SELECT id, nombre
+                FROM tipo_propiedad
+                ORDER BY id
+                """
+            )
+
+            tipos_list = [dict(tipo) for tipo in tipos]
+
+            logger.info(f"Tipos de propiedad obtenidos: {len(tipos_list)}")
+            return {
+                "success": True,
+                "items": tipos_list
+            }
+
+        except Exception as e:
+            logger.error(f"Error obteniendo tipos de propiedad: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "items": []
+            }
+
+    async def get_available_amenities(self) -> Dict[str, Any]:
+        """
+        Obtiene todos los amenities disponibles.
+
+        Returns:
+            Dict con success=True y lista de amenities, o error
+        """
+        try:
+            pool = await postgres.get_client()
+            amenities = await pool.fetch(
+                """
+                SELECT id, descripcion
+                FROM amenities
+                ORDER BY id
+                """
+            )
+
+            amenities_list = [dict(amenity) for amenity in amenities]
+
+            logger.info(f"Amenities obtenidos: {len(amenities_list)}")
+            return {
+                "success": True,
+                "items": amenities_list
+            }
+
+        except Exception as e:
+            logger.error(f"Error obteniendo amenities: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "items": []
+            }
+
+    async def get_available_services(self) -> Dict[str, Any]:
+        """
+        Obtiene todos los servicios disponibles.
+
+        Returns:
+            Dict con success=True y lista de servicios, o error
+        """
+        try:
+            pool = await postgres.get_client()
+            servicios = await pool.fetch(
+                """
+                SELECT id, descripcion
+                FROM servicios
+                ORDER BY id
+                """
+            )
+
+            servicios_list = [dict(servicio) for servicio in servicios]
+
+            logger.info(f"Servicios obtenidos: {len(servicios_list)}")
+            return {
+                "success": True,
+                "items": servicios_list
+            }
+
+        except Exception as e:
+            logger.error(f"Error obteniendo servicios: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "items": []
+            }
+
+    async def get_available_house_rules(self) -> Dict[str, Any]:
+        """
+        Obtiene todas las reglas de la casa disponibles.
+
+        Returns:
+            Dict con success=True y lista de reglas, o error
+        """
+        try:
+            pool = await postgres.get_client()
+            reglas = await pool.fetch(
+                """
+                SELECT id, descripcion
+                FROM regla_propiedad
+                ORDER BY id
+                """
+            )
+
+            reglas_list = [dict(regla) for regla in reglas]
+
+            logger.info(f"Reglas de la casa obtenidas: {len(reglas_list)}")
+            return {
+                "success": True,
+                "items": reglas_list
+            }
+
+        except Exception as e:
+            logger.error(f"Error obteniendo reglas de la casa: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "items": []
+            }
+
     async def _get_host_id_from_auth(
         self,
         pool,
@@ -122,6 +287,8 @@ class PropertyService:
         anfitrion_id: Optional[int] = None,
         auth_user_id: Optional[str] = None,
         tipo_propiedad_id: int = 1,
+        horario_check_in: Optional[str] = None,
+        horario_check_out: Optional[str] = None,
         imagenes: Optional[List[str]] = None,
         amenities: Optional[List[int]] = None,
         servicios: Optional[List[int]] = None,
@@ -131,7 +298,7 @@ class PropertyService:
     ) -> Dict[str, Any]:
         """
         Crea una nueva propiedad de forma atómica.
-        
+
         Args:
             nombre: Nombre de la propiedad
             descripcion: Descripción detallada
@@ -140,13 +307,15 @@ class PropertyService:
             anfitrion_id: ID del anfitrión (alternativa)
             auth_user_id: auth_user_id de Supabase (si anfitrion_id es None)
             tipo_propiedad_id: ID del tipo de propiedad
+            horario_check_in: Horario de check-in (formato HH:MM, opcional)
+            horario_check_out: Horario de check-out (formato HH:MM, opcional)
             imagenes: URLs de imágenes
             amenities: IDs de amenities
             servicios: IDs de servicios
             reglas: IDs de reglas
             generar_calendario: Generar calendario base
             dias_calendario: Cuántos días de calendario generar
-            
+
         Returns:
             Resultado de la creación (success, error, o property_id)
         """
@@ -196,13 +365,14 @@ class PropertyService:
                     # 1. Crear la propiedad
                     query = """
                         INSERT INTO propiedad (
-                            nombre, descripcion, capacidad, 
-                            ciudad_id, anfitrion_id, tipo_propiedad_id, imagenes
+                            nombre, descripcion, capacidad,
+                            ciudad_id, anfitrion_id, tipo_propiedad_id,
+                            imagenes
                         )
                         VALUES ($1, $2, $3, $4, $5, $6, $7)
                         RETURNING id, nombre, descripcion, capacidad
                     """
-                    
+
                     result = await conn.fetchrow(
                         query,
                         nombre,
@@ -213,7 +383,25 @@ class PropertyService:
                         tipo_propiedad_id,
                         imagenes or []
                     )
-                    
+
+                    propiedad_id = result['id']
+
+                    # 2. Actualizar horarios si fueron proporcionados
+                    if horario_check_in is not None or horario_check_out is not None:
+                        try:
+                            horario_query = """
+                                UPDATE propiedad
+                                SET horario_check_in = $2, horario_check_out = $3
+                                WHERE id = $1
+                            """
+                            logger.info(f"Actualizando horarios para propiedad {propiedad_id}: in={horario_check_in}, out={horario_check_out}")
+                            await conn.execute(horario_query, propiedad_id, horario_check_in, horario_check_out)
+                            logger.info(f"Horarios actualizados exitosamente para propiedad {propiedad_id}")
+                        except Exception as horario_error:
+                            logger.error(f"Error al actualizar horarios: {horario_error}")
+                            # No fallar el proceso completo por esto
+                            pass
+
                     propiedad_id = result['id']
                     logger.info(f"Propiedad creada con ID: {propiedad_id}")
 
@@ -454,90 +642,138 @@ class PropertyService:
         nombre: str = None,
         descripcion: str = None,
         capacidad: int = None,
+        ciudad_id: int = None,
         tipo_propiedad_id: int = None,
-        imagenes: List[str] = None
+        horario_check_in: str = None,
+        horario_check_out: str = None,
+        imagenes: List[str] = None,
+        amenities: List[int] = None,  # Reemplaza completamente los amenities
+        servicios: List[int] = None,  # Reemplaza completamente los servicios
+        reglas: List[int] = None,     # Reemplaza completamente las reglas
     ) -> Dict[str, Any]:
         """
-        Actualiza los datos básicos de una propiedad.
-        
+        Actualiza una propiedad con todas sus características.
+
         Args:
             property_id: ID de la propiedad
             nombre: Nuevo nombre (opcional)
             descripcion: Nueva descripción (opcional)
             capacidad: Nueva capacidad (opcional)
+            ciudad_id: Nuevo ID de ciudad (opcional)
             tipo_propiedad_id: Nuevo tipo de propiedad (opcional)
+            horario_check_in: Nuevo horario de check-in (opcional)
+            horario_check_out: Nuevo horario de check-out (opcional)
             imagenes: Nuevas imágenes (opcional)
-            
+            amenities: Lista completa de IDs de amenities para reemplazar (opcional)
+            servicios: Lista completa de IDs de servicios para reemplazar (opcional)
+            reglas: Lista completa de IDs de reglas para reemplazar (opcional)
+
         Returns:
             Resultado de la actualización
         """
         try:
             pool = await postgres.get_client()
-            
-            # Construir query dinámico con los campos a actualizar
-            updates = []
-            params = []
-            param_idx = 1
-            
-            if nombre is not None:
-                updates.append(f"nombre = ${param_idx}")
-                params.append(nombre)
-                param_idx += 1
-            
-            if descripcion is not None:
-                updates.append(f"descripcion = ${param_idx}")
-                params.append(descripcion)
-                param_idx += 1
-            
-            if capacidad is not None:
-                updates.append(f"capacidad = ${param_idx}")
-                params.append(capacidad)
-                param_idx += 1
-            
-            if tipo_propiedad_id is not None:
-                updates.append(f"tipo_propiedad_id = ${param_idx}")
-                params.append(tipo_propiedad_id)
-                param_idx += 1
-            
-            if imagenes is not None:
-                updates.append(f"imagenes = ${param_idx}")
-                params.append(imagenes)
-                param_idx += 1
-            
-            if not updates:
-                return {
-                    "success": False,
-                    "error": "No hay campos para actualizar"
-                }
-            
-            params.append(property_id)  # Para WHERE clause
-            
-            query = f"""
-                UPDATE propiedad
-                SET {', '.join(updates)}
-                WHERE id = ${param_idx}
-                RETURNING id, nombre, descripcion, capacidad, tipo_propiedad_id
-            """
-            
+
+            # Atualizar en transacción completa
             async with pool.acquire() as conn:
-                result = await conn.fetchrow(query, *params)
-            
-            if not result:
-                return {
-                    "success": False,
-                    "error": f"Propiedad con ID {property_id} no existe"
-                }
-            
-            logger.info(f"Propiedad {property_id} actualizada")
-            
+                async with conn.transaction():
+                    # 1. Construir query dinámico para campos básicos
+                    updates = []
+                    params = []
+                    param_idx = 1
+
+                    if nombre is not None:
+                        updates.append(f"nombre = ${param_idx}")
+                        params.append(nombre)
+                        param_idx += 1
+
+                    if descripcion is not None:
+                        updates.append(f"descripcion = ${param_idx}")
+                        params.append(descripcion)
+                        param_idx += 1
+
+                    if capacidad is not None:
+                        updates.append(f"capacidad = ${param_idx}")
+                        params.append(capacidad)
+                        param_idx += 1
+
+                    if ciudad_id is not None:
+                        updates.append(f"ciudad_id = ${param_idx}")
+                        params.append(ciudad_id)
+                        param_idx += 1
+
+                    if tipo_propiedad_id is not None:
+                        updates.append(f"tipo_propiedad_id = ${param_idx}")
+                        params.append(tipo_propiedad_id)
+                        param_idx += 1
+
+                    if horario_check_in is not None:
+                        updates.append(f"horario_check_in = ${param_idx}")
+                        params.append(horario_check_in)
+                        param_idx += 1
+
+                    if horario_check_out is not None:
+                        updates.append(f"horario_check_out = ${param_idx}")
+                        params.append(horario_check_out)
+                        param_idx += 1
+
+                    if imagenes is not None:
+                        updates.append(f"imagenes = ${param_idx}")
+                        params.append(imagenes)
+                        param_idx += 1
+
+                    # Ejecutar actualización si hay campos para cambiar
+                    if updates:
+                        params.append(property_id)
+                        query = f"""
+                            UPDATE propiedad
+                            SET {', '.join(updates)}
+                            WHERE id = ${param_idx}
+                        """
+                        await conn.execute(query, *params)
+
+                    # 2. Actualizar amenities si se especifica
+                    if amenities is not None:
+                        await conn.execute(
+                            "DELETE FROM propiedad_amenity WHERE propiedad_id = $1",
+                            property_id
+                        )
+                        if amenities:
+                            await self._add_amenities(conn, property_id, amenities)
+
+                    # 3. Actualizar servicios si se especifica
+                    if servicios is not None:
+                        await conn.execute(
+                            "DELETE FROM propiedad_servicio WHERE propiedad_id = $1",
+                            property_id
+                        )
+                        if servicios:
+                            await self._add_servicios(conn, property_id, servicios)
+
+                    # 4. Actualizar reglas si se especifica
+                    if reglas is not None:
+                        await conn.execute(
+                            "DELETE FROM propiedad_regla WHERE propiedad_id = $1",
+                            property_id
+                        )
+                        if reglas:
+                            await self._add_reglas(conn, property_id, reglas)
+
+            # Obtener datos actualizados de la propiedad
+            result = await self.get_property(property_id)
+            if not result["success"]:
+                return result
+
+            logger.info(f"Propiedad {property_id} completamente actualizada")
+
             return {
                 "success": True,
-                "message": "Propiedad actualizada",
-                "property": dict(result)
+                "message": "Propiedad completamente actualizada",
+                "property": result["property"]
             }
-            
+
         except Exception as e:
-            logger.error(f"Error al actualizar propiedad: {e}")
+            logger.error(f"Error al actualizar propiedad completa: {e}")
             return {"success": False, "error": str(e)}
 
     async def delete_property(self, property_id: int) -> Dict[str, Any]:
@@ -610,4 +846,3 @@ class PropertyService:
         except Exception as e:
             logger.error(f"Error al eliminar propiedad: {e}")
             return {"success": False, "error": str(e)}
-

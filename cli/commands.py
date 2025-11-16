@@ -13,6 +13,7 @@ from utils.logging import get_logger, configure_logging
 # Importar módulos CLI de features
 from cli.auth.commands import app as auth_app
 from cli.properties.commands import app as properties_app
+from cli.reservations.commands import app as reservations_app, handle_reservation_management
 
 # Configurar logging al importar
 configure_logging()
@@ -26,6 +27,7 @@ app = typer.Typer(
 # Integrar sub-apps de features
 app.add_typer(auth_app, name="auth", help="Comandos de autenticación")
 app.add_typer(properties_app, name="properties", help="Gestión de propiedades")
+app.add_typer(reservations_app, name="reservations", help="Gestión de reservas")
 
 # Variable global para almacenar el usuario actual
 current_user_session = None
@@ -78,6 +80,8 @@ async def interactive_mode():
                     await show_mongo_stats(current_user_session)
                 elif action == "properties":
                     await handle_property_management(current_user_session)
+                elif action == "reservations":
+                    await handle_reservation_management(current_user_session)
                 elif action == "exit":
                     typer.echo("👋 ¡Hasta luego!")
                     break
@@ -130,6 +134,9 @@ async def show_main_menu(user_profile):
         options.insert(-2, "📊 Ver estadísticas MongoDB")
         options.insert(-2, "🏠 Gestionar mis propiedades")
     
+    if user_profile.rol in ['HUESPED', 'AMBOS']:
+        options.insert(-2, "📅 Gestionar mis reservas")
+    
     for i, option in enumerate(options, 1):
         typer.echo(f"{i}. {option}")
     
@@ -145,6 +152,8 @@ async def show_main_menu(user_profile):
                     return "mongo_stats"
                 elif "propiedades" in options[choice-1]:
                     return "properties"
+                elif "reservas" in options[choice-1]:
+                    return "reservations"
                 elif "Salir" in options[choice-1]:
                     return "exit"
             else:

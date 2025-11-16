@@ -5,10 +5,15 @@ Comandos del CLI usando Typer - Versión Interactiva.
 import typer
 import asyncio
 from typing import Optional
+from datetime import datetime, date
 from services.auth import AuthService
 from services.user import UserService
 from services.mongo_host import MongoHostService
+from services.reservations import ReservationService
 from utils.logging import get_logger, configure_logging
+
+# Importar módulos CLI de features
+from cli.reservations.commands import handle_reservation_management
 
 # Configurar logging al importar
 configure_logging()
@@ -68,6 +73,10 @@ async def interactive_mode():
                     await show_user_profile(current_user_session)
                 elif action == "properties":
                     await handle_properties_menu(current_user_session)
+                elif action == "availability":
+                    await handle_availability_management(current_user_session)
+                elif action == "reservations":
+                    await handle_reservation_management(current_user_session)
                 elif action == "mongo_stats":
                     await show_mongo_stats(current_user_session)
                 elif action == "exit":
@@ -120,7 +129,11 @@ async def show_main_menu(user_profile):
     # Agregar opciones específicas por rol
     if user_profile.rol in ['ANFITRION', 'AMBOS']:
         options.insert(-2, "🏠 Gestionar mis propiedades")
+        options.insert(-2, "📅 Gestionar disponibilidad de propiedades")
         options.insert(-2, "📊 Ver estadísticas MongoDB")
+    
+    if user_profile.rol in ['HUESPED', 'AMBOS']:
+        options.insert(-2, "📅 Gestionar mis reservas")
 
     for i, option in enumerate(options, 1):
         typer.echo(f"{i}. {option}")
@@ -133,8 +146,12 @@ async def show_main_menu(user_profile):
                     return "profile"
                 elif "Cerrar sesión" in options[choice-1]:
                     return "logout"
-                elif "propiedades" in options[choice-1]:
+                elif "Gestionar mis propiedades" in options[choice-1]:
                     return "properties"
+                elif "disponibilidad de propiedades" in options[choice-1]:
+                    return "availability"
+                elif "Gestionar mis reservas" in options[choice-1]:
+                    return "reservations"
                 elif "estadísticas MongoDB" in options[choice-1]:
                     return "mongo_stats"
                 elif "Salir" in options[choice-1]:
@@ -1284,6 +1301,151 @@ def delete_property(
             typer.echo(f"❌ Error: {result['error']}")
     
     asyncio.run(_delete())
+
+
+async def handle_availability_management(user_profile):
+    """Gestiona la disponibilidad de propiedades para anfitriones."""
+    # Verificar que el usuario sea anfitrión
+    if user_profile.rol not in ['ANFITRION', 'AMBOS']:
+        typer.echo("❌ Solo los anfitriones pueden gestionar disponibilidad")
+        typer.echo("Presiona Enter para continuar...")
+        input()
+        return
+
+    reservation_service = ReservationService()
+    anfitrion_id = user_profile.anfitrion_id
+
+    while True:
+        typer.echo("\n📅 GESTIÓN DE DISPONIBILIDAD")
+        typer.echo("=" * 50)
+        typer.echo("1. 📊 Ver calendario de disponibilidad")
+        typer.echo("2. 🚫 Bloquear fechas")
+        typer.echo("3. ✅ Habilitar fechas")
+        typer.echo("4. 🔍 Verificar disponibilidad")
+        typer.echo("5. 📈 Ver estadísticas de disponibilidad")
+        typer.echo("6. ⬅️  Volver al menú principal")
+
+        try:
+            choice = typer.prompt("Selecciona una opción (1-6)", type=int)
+
+            if choice == 1:
+                await show_availability_calendar_interactive(reservation_service, anfitrion_id)
+            elif choice == 2:
+                await block_property_dates_interactive(reservation_service, anfitrion_id)
+            elif choice == 3:
+                await unblock_property_dates_interactive(reservation_service, anfitrion_id)
+            elif choice == 4:
+                await check_availability_interactive(reservation_service, anfitrion_id)
+            elif choice == 5:
+                await show_availability_stats_interactive(reservation_service, anfitrion_id)
+            elif choice == 6:
+                break
+            else:
+                typer.echo("❌ Opción inválida. Por favor selecciona entre 1 y 6.")
+
+        except ValueError:
+            typer.echo("❌ Por favor ingresa un número válido.")
+        except KeyboardInterrupt:
+            typer.echo("\n👋 Regresando al menú principal...")
+            break
+        except Exception as e:
+            typer.echo(f"❌ Error inesperado: {str(e)}")
+            logger.error("Error en gestión de disponibilidad", error=str(e))
+
+
+async def handle_reservation_management(user_profile):
+    """Gestiona las reservas según el rol del usuario."""
+    reservation_service = ReservationService()
+
+    if user_profile.rol in ['HUESPED', 'AMBOS']:
+        await handle_guest_reservations(reservation_service, user_profile)
+    elif user_profile.rol == 'ANFITRION':
+        await handle_host_reservations(reservation_service, user_profile)
+
+
+async def handle_guest_reservations(reservation_service, user_profile):
+    """Gestiona las reservas como huésped."""
+    huesped_id = user_profile.huesped_id
+
+    while True:
+        typer.echo("\n📅 GESTIÓN DE RESERVAS")
+        typer.echo("=" * 50)
+        typer.echo(f"👤 Huésped: {user_profile.email} (ID: {huesped_id})")
+        typer.echo("-" * 50)
+        typer.echo("1. 📋 Ver mis reservas")
+        typer.echo("2. ➕ Crear nueva reserva")
+        typer.echo("3. 📝 Ver detalles de una reserva")
+        typer.echo("4. ❌ Cancelar reserva")
+        typer.echo("5. 🔍 Ver disponibilidad de una propiedad")
+        typer.echo("6. ⬅️  Volver al menú principal")
+
+        try:
+            choice = typer.prompt("Selecciona una opción (1-6)", type=int)
+
+            if choice == 1:
+                await show_guest_reservations(reservation_service, huesped_id)
+            elif choice == 2:
+                await create_reservation_interactive(reservation_service, huesped_id)
+            elif choice == 3:
+                await show_reservation_details_interactive(reservation_service, huesped_id)
+            elif choice == 4:
+                await cancel_reservation_interactive(reservation_service, huesped_id)
+            elif choice == 5:
+                await check_property_availability_interactive(reservation_service)
+            elif choice == 6:
+                break
+            else:
+                typer.echo("❌ Opción inválida. Por favor selecciona entre 1 y 6.")
+
+        except ValueError:
+            typer.echo("❌ Por favor ingresa un número válido.")
+        except KeyboardInterrupt:
+            typer.echo("\n👋 Regresando al menú principal...")
+            break
+        except Exception as e:
+            typer.echo(f"❌ Error inesperado: {str(e)}")
+            logger.error("Error en gestión de reservas", error=str(e))
+
+
+async def handle_host_reservations(reservation_service, user_profile):
+    """Gestiona las reservas como anfitrión."""
+    anfitrion_id = user_profile.anfitrion_id
+
+    while True:
+        typer.echo("\n📅 GESTIÓN DE RESERVAS - ANFITRIÓN")
+        typer.echo("=" * 50)
+        typer.echo(f"🏠 Anfitrión: {user_profile.email} (ID: {anfitrion_id})")
+        typer.echo("-" * 50)
+        typer.echo("1. 📋 Ver reservas de mis propiedades")
+        typer.echo("2. 📝 Ver detalles de una reserva")
+        typer.echo("3. ✅ Confirmar reserva")
+        typer.echo("4. ❌ Cancelar reserva")
+        typer.echo("5. ⬅️  Volver al menú principal")
+
+        try:
+            choice = typer.prompt("Selecciona una opción (1-5)", type=int)
+
+            if choice == 1:
+                await show_host_reservations(reservation_service, anfitrion_id)
+            elif choice == 2:
+                await show_reservation_details_interactive(reservation_service, None, anfitrion_id)
+            elif choice == 3:
+                await confirm_reservation_interactive(reservation_service, anfitrion_id)
+            elif choice == 4:
+                await cancel_reservation_interactive(reservation_service, None, anfitrion_id)
+            elif choice == 5:
+                break
+            else:
+                typer.echo("❌ Opción inválida. Por favor selecciona entre 1 y 5.")
+
+        except ValueError:
+            typer.echo("❌ Por favor ingresa un número válido.")
+        except KeyboardInterrupt:
+            typer.echo("\n👋 Regresando al menú principal...")
+            break
+        except Exception as e:
+            typer.echo(f"❌ Error inesperado: {str(e)}")
+            logger.error("Error en gestión de reservas de anfitrión", error=str(e))
 
 
 if __name__ == "__main__":

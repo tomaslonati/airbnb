@@ -135,3 +135,64 @@ class Migration004CreatePropertyMetrics(BaseMigration):
         """Eliminar tabla property_daily_metrics."""
         await cassandra.execute_query("DROP TABLE IF EXISTS property_daily_metrics;")
         logger.info("Tabla property_daily_metrics eliminada")
+
+class Migration005CreatePropertiesByCity(BaseMigration):
+    """
+    Crea la tabla de búsqueda (Query Table) para propiedades por ciudad y capacidad.
+    Esta es la tabla "craneada" para tu caso de uso.
+    """
+    
+    def __init__(self):
+        super().__init__("005", "Crear tabla properties_by_city_and_capacity")
+
+    async def up(self):
+        """Crear tabla properties_by_city_and_capacity y poblarla."""
+        logger.info("Ejecutando migración 005: Creando 'properties_by_city_and_capacity'...")
+        
+        # 1. EL DDL (CREATE TABLE)
+        # La estructura de la tabla diseñada para tu consulta.
+        create_table_query = """
+            CREATE TABLE IF NOT EXISTS properties_by_city_and_capacity (
+                ciudad_nombre text,
+                capacidad int,
+                propiedad_id int,
+                nombre_propiedad text,
+                
+                -- CLAVE PRIMARIA:
+                PRIMARY KEY ((ciudad_nombre), capacidad, propiedad_id)
+            );
+        """
+        
+        await cassandra.execute_query(create_table_query)
+        logger.info("Tabla 'properties_by_city_and_capacity' creada exitosamente.")
+        
+        
+        logger.info("Poblando 'properties_by_city_and_capacity' con datos de Postgres...")
+        
+        inserts = [
+            """
+            INSERT INTO properties_by_city_and_capacity (ciudad_nombre, capacidad, propiedad_id, nombre_propiedad) 
+            VALUES ('Buenos Aires', 4, 26, 'casa con pileta');
+            """,
+            """
+            INSERT INTO properties_by_city_and_capacity (ciudad_nombre, capacidad, propiedad_id, nombre_propiedad) 
+            VALUES ('Buenos Aires', 4, 24, 'depto en Palermo');
+            """,
+            """
+            INSERT INTO properties_by_city_and_capacity (ciudad_nombre, capacidad, propiedad_id, nombre_propiedad) 
+            VALUES ('Buenos Aires', 3, 25, 'monoambiente en el centro');
+            """
+        ]
+        
+        for query in inserts:
+            # Usamos el mismo método 'execute_query' que SÍ funciona
+            # cuando es llamado desde main.py
+            await cassandra.execute_query(query)
+
+        logger.info(f"¡Éxito! {len(inserts)} registros insertados en 'properties_by_city_and_capacity'.")
+
+
+    async def down(self):
+        """Eliminar tabla properties_by_city_and_capacity."""
+        await cassandra.execute_query("DROP TABLE IF EXISTS properties_by_city_and_capacity;")
+        logger.info("Tabla 'properties_by_city_and_capacity' eliminada")

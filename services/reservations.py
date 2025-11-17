@@ -1,13 +1,14 @@
 """
-Servicio de reservas que utiliza PostgreSQL (Supabase).
-Cassandra logging será agregado en el futuro.
+Servicio de reservas que utiliza PostgreSQL (Supabase) con sincronización en Cassandra.
 """
 
 from datetime import date, timedelta
 from typing import Dict, Any, Optional
 from decimal import Decimal
 from db.postgres import execute_query, execute_command, get_client
+from repositories.cassandra_reservation_repository import get_cassandra_reservation_repository
 from utils.logging import get_logger
+import asyncio
 
 logger = get_logger(__name__)
 
@@ -18,7 +19,7 @@ class ReservationService:
 
     Responsabilidades:
     - Gestionar reservas en PostgreSQL
-    - Registrar eventos en Cassandra
+    - Sincronizar con Cassandra para analytics
     - Validar disponibilidad
     - Calcular precios
     - Gestionar comunidades host-huésped en Neo4j
@@ -27,6 +28,8 @@ class ReservationService:
     def __init__(self):
         # Inicialización lazy del servicio Neo4j para evitar dependencias circulares
         self._neo4j_service = None
+        # Repositorio Cassandra para sincronización
+        self._cassandra_repo = None
         logger.info("ReservationService inicializado")
 
     @property
@@ -42,44 +45,109 @@ class ReservationService:
                 self._neo4j_service = None
         return self._neo4j_service
 
+    @property
+    async def cassandra_repo(self):
+        """Lazy loading del repositorio Cassandra"""
+        if self._cassandra_repo is None:
+            try:
+                self._cassandra_repo = await get_cassandra_reservation_repository()
+            except Exception as e:
+                logger.warning(f"No se pudo inicializar repositorio Cassandra: {e}")
+                self._cassandra_repo = None
+        return self._cassandra_repo
+
     def close(self):
         """Cierra las conexiones de servicios externos"""
         if self._neo4j_service:
             self._neo4j_service.close()
             self._neo4j_service = None
+        
+        if self._cassandra_repo:
+            asyncio.create_task(self._cassandra_repo.close())
+            self._cassandra_repo = None
 
-    async def _log_event_to_cassandra(
+    async def _sync_reservation_to_cassandra(
         self,
-        reserva_id: int,
+        reserva_id: str,
         event_type: str,
         propiedad_id: int,
-        huesped_id: int,
+        huesped_id: str,
         check_in: date,
         check_out: date,
-        metadata: Optional[Dict[str, str]] = None
+        monto_total: Optional[Decimal] = None,
+        host_id: Optional[str] = None,
+        ciudad_id: Optional[int] = None
     ):
         """
-        Placeholder para logging de eventos en Cassandra (futuro).
-        Por ahora solo registra en logs.
+        Sincroniza eventos de reservas con Cassandra usando el repositorio específico.
 
         Args:
             reserva_id: ID de la reserva
-            event_type: Tipo de evento (CREATED, CANCELLED, CHECKED_IN, etc.)
+            event_type: Tipo de evento (CREATED, CANCELLED)
             propiedad_id: ID de la propiedad
             huesped_id: ID del huésped
             check_in: Fecha de entrada
             check_out: Fecha de salida
-            metadata: Información adicional del evento
+            monto_total: Monto total de la reserva (para creación)
+            host_id: ID del anfitrión
+            ciudad_id: ID de la ciudad
         """
-        logger.info(
-            f"Evento {event_type} para reserva {reserva_id}",
-            event_type=event_type,
-            reserva_id=reserva_id,
-            propiedad_id=propiedad_id,
-            huesped_id=huesped_id
-        )
-        # TODO: Implementar logging en Cassandra cuando esté listo
-        pass
+        try:
+            repo = await self.cassandra_repo
+            if not repo:
+                logger.warning("Repositorio Cassandra no disponible, saltando sincronización")
+                return
+
+            # Obtener datos adicionales si no se proporcionaron
+            if not host_id or not ciudad_id:
+                prop_query = """
+                    SELECT p.anfitrion_id, c.id as ciudad_id
+                    FROM propiedad p
+                    JOIN ciudad c ON p.ciudad_id = c.id
+                    WHERE p.id = $1
+                """
+                
+                prop_result = await execute_query(prop_query, propiedad_id)
+                if prop_result:
+                    host_id = host_id or str(prop_result[0]['anfitrion_id'])
+                    ciudad_id = ciudad_id or prop_result[0]['ciudad_id']
+
+            # Sincronizar según el tipo de evento
+            if event_type == "CREATED" and monto_total:
+                await repo.sync_reservation_creation(
+                    ciudad_id=ciudad_id,
+                    host_id=host_id,
+                    propiedad_id=str(propiedad_id),
+                    huesped_id=huesped_id,
+                    reserva_id=reserva_id,
+                    fecha_check_in=check_in,
+                    fecha_check_out=check_out,
+                    monto_total=monto_total
+                )
+                logger.info(f"✅ Reserva {reserva_id} sincronizada con Cassandra (CREADA)")
+
+            elif event_type == "CANCELLED":
+                await repo.sync_reservation_cancellation(
+                    ciudad_id=ciudad_id,
+                    host_id=host_id,
+                    propiedad_id=str(propiedad_id),
+                    reserva_id=reserva_id,
+                    fecha_check_in=check_in,
+                    fecha_check_out=check_out
+                )
+                logger.info(f"✅ Reserva {reserva_id} sincronizada con Cassandra (CANCELADA)")
+
+        except Exception as e:
+            # No fallar el flujo principal si Cassandra falla
+            logger.error(f"❌ Error sincronizando con Cassandra: {e}")
+            # Registrar para potencial reintento futuro
+            logger.info(
+                f"📝 Evento {event_type} para reserva {reserva_id}",
+                event_type=event_type,
+                reserva_id=reserva_id,
+                propiedad_id=propiedad_id,
+                huesped_id=huesped_id
+            )
 
     async def _mark_dates_unavailable(
         self,
@@ -98,7 +166,10 @@ class ReservationService:
             reason: Razón de la no disponibilidad
         """
         try:
+            from db.cassandra import cassandra_mark_unavailable
+            
             current_date = check_in
+            fechas_para_cassandra = []
 
             while current_date < check_out:
                 # Usar UPSERT para evitar conflictos de fechas duplicadas
@@ -112,10 +183,21 @@ class ReservationService:
                 """
 
                 await execute_command(query, propiedad_id, current_date, None)
+                fechas_para_cassandra.append(current_date)
                 current_date += timedelta(days=1)
 
             logger.info(
                 f"Fechas {check_in} a {check_out} marcadas como no disponibles para propiedad {propiedad_id}")
+
+            # Sincronizar con Cassandra
+            try:
+                if fechas_para_cassandra:
+                    await cassandra_mark_unavailable(propiedad_id, fechas_para_cassandra)
+                    logger.info(f"Sincronizado estado no disponible en Cassandra para propiedad {propiedad_id}")
+            except Exception as cassandra_error:
+                logger.error(f"Error al sincronizar con Cassandra para marcar no disponible: {cassandra_error}")
+                # No fallar el proceso completo por errores de Cassandra
+                pass
 
         except Exception as e:
             logger.error(
@@ -139,7 +221,10 @@ class ReservationService:
             price_per_night: Precio por noche (opcional)
         """
         try:
+            from db.cassandra import cassandra_mark_available
+            
             current_date = check_in
+            fechas_para_cassandra = []
 
             # Si no se especifica precio, usar precio por defecto
             if price_per_night is None:
@@ -158,10 +243,21 @@ class ReservationService:
                 """
 
                 await execute_command(query, propiedad_id, current_date, price_per_night)
+                fechas_para_cassandra.append(current_date)
                 current_date += timedelta(days=1)
 
             logger.info(
                 f"Fechas {check_in} a {check_out} marcadas como disponibles para propiedad {propiedad_id}")
+
+            # Sincronizar con Cassandra
+            try:
+                if fechas_para_cassandra:
+                    await cassandra_mark_available(propiedad_id, fechas_para_cassandra)
+                    logger.info(f"Sincronizado estado disponible en Cassandra para propiedad {propiedad_id}")
+            except Exception as cassandra_error:
+                logger.error(f"Error al sincronizar con Cassandra para marcar disponible: {cassandra_error}")
+                # No fallar el proceso completo por errores de Cassandra
+                pass
 
         except Exception as e:
             logger.error(f"Error marcando fechas como disponibles: {str(e)}")
@@ -414,17 +510,28 @@ class ReservationService:
                         # No fallar la reserva por esto
 
             # Registrar evento en Cassandra (async, no bloquear si falla)
-            await self._log_event_to_cassandra(
-                reserva_id=reserva_id,
+            await self._sync_reservation_to_cassandra(
+                reserva_id=str(reserva_id),
                 event_type="CREATED",
                 propiedad_id=propiedad_id,
-                huesped_id=huesped_id,
+                huesped_id=str(huesped_id),
                 check_in=check_in,
                 check_out=check_out,
-                metadata={
-                    "num_huespedes": str(num_huespedes),
-                    "precio_total": str(total_price)
-                }
+                monto_total=total_price,
+                host_id=str(propiedad['anfitrion_id']),
+                ciudad_id=None  # Se obtendrá automáticamente
+            )
+
+            # Sincronizar nuevas tablas de Cassandra
+            await self._sync_nueva_reserva_cassandra(
+                reserva_id=reserva_id,
+                propiedad_id=propiedad_id,
+                host_id=propiedad['anfitrion_id'],
+                huesped_id=huesped_id,
+                fecha_inicio=check_in,
+                fecha_fin=check_out,
+                precio_total=float(total_price),
+                estado="confirmada"
             )
 
             # Crear/actualizar relación host-guest en Neo4j para análisis de comunidades
@@ -669,7 +776,7 @@ class ReservationService:
         try:
             # Verificar que la reserva existe y pertenece al huésped
             verify_query = """
-                SELECT r.id, r.propiedad_id, r.fecha_inicio, r.fecha_fin, er.nombre as estado
+                SELECT r.id, r.propiedad_id, r.fecha_check_in, r.fecha_check_out, er.nombre as estado
                 FROM reserva r
                 JOIN estado_reserva er ON r.estado_reserva_id = er.id
                 WHERE r.id = $1 AND r.huesped_id = $2
@@ -716,15 +823,25 @@ class ReservationService:
 
             logger.info(f"Reserva {reserva_id} cancelada exitosamente")
 
+            # Liberar fechas en la tabla de disponibilidad
+            try:
+                await self._mark_dates_available(
+                    propiedad_id=reserva['propiedad_id'],
+                    check_in=reserva['fecha_check_in'], 
+                    check_out=reserva['fecha_check_out']
+                )
+                logger.info(f"Fechas liberadas para propiedad {reserva['propiedad_id']}")
+            except Exception as e:
+                logger.warning(f"Error liberando fechas: {str(e)}")
+
             # Registrar evento en Cassandra
-            await self._log_event_to_cassandra(
-                reserva_id=reserva_id,
+            await self._sync_reservation_to_cassandra(
+                reserva_id=str(reserva_id),
                 event_type="CANCELLED",
                 propiedad_id=reserva['propiedad_id'],
-                huesped_id=huesped_id,
-                check_in=reserva['fecha_inicio'],
-                check_out=reserva['fecha_fin'],
-                metadata={"reason": reason or "Sin razón especificada"}
+                huesped_id=str(huesped_id),
+                check_in=reserva['fecha_check_in'],
+                check_out=reserva['fecha_check_out']
             )
 
             return {
@@ -797,4 +914,145 @@ class ReservationService:
             return {
                 "success": False,
                 "error": f"Error al obtener disponibilidad: {str(e)}"
+            }
+
+    async def _sync_nueva_reserva_cassandra(self, reserva_id: int, propiedad_id: int, 
+                                          host_id: int, huesped_id: int, fecha_inicio: date, 
+                                          fecha_fin: date, precio_total: float, estado: str):
+        """
+        Sincroniza una nueva reserva con las nuevas tablas de Cassandra.
+        """
+        try:
+            from db.cassandra import cassandra_add_reserva, get_ciudad_id_for_propiedad
+            from datetime import datetime
+            
+            # Obtener ciudad_id
+            ciudad_id = await get_ciudad_id_for_propiedad(propiedad_id)
+            if not ciudad_id:
+                logger.warning(f"No se pudo obtener ciudad_id para propiedad {propiedad_id}")
+                return
+
+            # Preparar datos de la reserva
+            reserva_data = {
+                'reserva_id': reserva_id,
+                'propiedad_id': propiedad_id,
+                'host_id': host_id,
+                'huesped_id': huesped_id,
+                'ciudad_id': ciudad_id,
+                'fecha_inicio': fecha_inicio.isoformat(),
+                'fecha_fin': fecha_fin.isoformat(),
+                'estado': estado,
+                'precio_total': precio_total,
+                'created_at': datetime.now().isoformat()
+            }
+            
+            # Sincronizar en Cassandra
+            await cassandra_add_reserva(reserva_data)
+            
+            logger.info(f"Reserva {reserva_id} sincronizada con tablas nuevas de Cassandra")
+            
+        except Exception as e:
+            logger.error(f"Error sincronizando nueva reserva en Cassandra: {e}")
+
+    async def _remove_reserva_cassandra(self, reserva_id: int, propiedad_id: int, 
+                                       host_id: int, fecha_inicio: date):
+        """
+        Elimina una reserva de las nuevas tablas de Cassandra.
+        """
+        try:
+            from db.cassandra import cassandra_remove_reserva, get_ciudad_id_for_propiedad
+            
+            # Obtener ciudad_id
+            ciudad_id = await get_ciudad_id_for_propiedad(propiedad_id)
+            if not ciudad_id:
+                logger.warning(f"No se pudo obtener ciudad_id para propiedad {propiedad_id}")
+                return
+
+            # Preparar datos de la reserva
+            reserva_data = {
+                'reserva_id': reserva_id,
+                'propiedad_id': propiedad_id,
+                'host_id': host_id,
+                'ciudad_id': ciudad_id,
+                'fecha_inicio': fecha_inicio.isoformat()
+            }
+            
+            # Eliminar de Cassandra
+            await cassandra_remove_reserva(reserva_data)
+            
+            logger.info(f"Reserva {reserva_id} eliminada de las tablas nuevas de Cassandra")
+            
+        except Exception as e:
+            logger.error(f"Error eliminando reserva de Cassandra: {e}")
+
+    async def get_propiedades_disponibles_fecha(self, fecha: date, ciudad_id: int = None):
+        """
+        CU 4: Obtiene propiedades disponibles en una fecha específica usando Cassandra.
+        """
+        try:
+            from db.cassandra import get_propiedades_disponibles_por_fecha
+            
+            propiedades = await get_propiedades_disponibles_por_fecha(fecha, ciudad_id)
+            
+            return {
+                "success": True,
+                "fecha": fecha.isoformat(),
+                "ciudad_id": ciudad_id,
+                "propiedades": propiedades,
+                "total": len(propiedades)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo propiedades disponibles: {e}")
+            return {
+                "success": False,
+                "error": f"Error obteniendo propiedades: {str(e)}"
+            }
+
+    async def get_reservas_host(self, host_id: int, fecha: date):
+        """
+        CU 6: Obtiene reservas de un host en una fecha específica usando Cassandra.
+        """
+        try:
+            from db.cassandra import get_reservas_por_host_fecha
+            
+            reservas = await get_reservas_por_host_fecha(host_id, fecha)
+            
+            return {
+                "success": True,
+                "host_id": host_id,
+                "fecha": fecha.isoformat(),
+                "reservas": reservas,
+                "total": len(reservas)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo reservas de host: {e}")
+            return {
+                "success": False,
+                "error": f"Error obteniendo reservas: {str(e)}"
+            }
+
+    async def get_reservas_ciudad(self, ciudad_id: int, fecha: date):
+        """
+        CU 5: Obtiene reservas de una ciudad en una fecha específica usando Cassandra.
+        """
+        try:
+            from db.cassandra import get_reservas_por_ciudad_fecha
+            
+            reservas = await get_reservas_por_ciudad_fecha(ciudad_id, fecha)
+            
+            return {
+                "success": True,
+                "ciudad_id": ciudad_id,
+                "fecha": fecha.isoformat(),
+                "reservas": reservas,
+                "total": len(reservas)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo reservas de ciudad: {e}")
+            return {
+                "success": False,
+                "error": f"Error obteniendo reservas: {str(e)}"
             }

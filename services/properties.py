@@ -499,6 +499,7 @@ class PropertyService:
         """Genera disponibilidad base para los próximos N días."""
         try:
             from datetime import datetime, timedelta
+            from db.cassandra import cassandra_init_date
             
             query = """
                 INSERT INTO fecha (propiedad_id, fecha, tarifa, esta_disponible)
@@ -509,11 +510,28 @@ class PropertyService:
             fecha_inicio = datetime.now().date()
             tarifa_base = 100.0  # Tarifa por defecto
             
+            # Preparar lote de fechas para Cassandra
+            fechas_cassandra = []
+            
             for i in range(dias):
                 fecha = fecha_inicio + timedelta(days=i)
                 await conn.execute(query, propiedad_id, fecha, tarifa_base)
+                
+                # Acumular fechas para sync con Cassandra
+                fechas_cassandra.append(fecha)
             
             logger.info(f"Generado calendario para {dias} días para propiedad {propiedad_id}")
+            
+            # Sincronizar con Cassandra usando batch operations
+            try:
+                if fechas_cassandra:
+                    await cassandra_init_date(propiedad_id, fechas_cassandra)
+                    logger.info(f"Sincronizada disponibilidad inicial en Cassandra para propiedad {propiedad_id}")
+            except Exception as cassandra_error:
+                logger.error(f"Error al sincronizar disponibilidad inicial con Cassandra para propiedad {propiedad_id}: {cassandra_error}")
+                # No fallar el proceso completo por errores de Cassandra
+                pass
+                
         except Exception as e:
             logger.error(f"Error al generar disponibilidad: {e}")
             raise

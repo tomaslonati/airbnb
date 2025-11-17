@@ -1,0 +1,539 @@
+"""
+Conexión a AstraDB usando DataAPIClient.
+"""
+
+from astrapy import DataAPIClient
+from typing import Optional, Any
+from config import db_config
+from utils.logging import get_logger
+from utils.retry import retry_on_connection_error
+
+logger = get_logger(__name__)
+
+# Clientes globales
+_astra_client: Optional[DataAPIClient] = None
+_astra_database: Optional[Any] = None
+
+
+@retry_on_connection_error()
+async def get_astra_client():
+    """Obtiene el cliente de AstraDB DataAPI."""
+    global _astra_client, _astra_database
+
+    if _astra_client is None:
+        logger.info("Creando cliente AstraDB DataAPI")
+        
+        # Inicializar cliente
+        _astra_client = DataAPIClient(db_config.astra_db_token)
+        _astra_database = _astra_client.get_database_by_api_endpoint(
+            db_config.astra_db_endpoint
+        )
+        
+        # Verificar conexión
+        collections = _astra_database.list_collection_names()
+        logger.info(f"Conectado a AstraDB. Colecciones: {collections}")
+
+    return _astra_database
+
+
+async def create_collection(collection_name: str, dimension: int = None):
+    """Crea una colección en AstraDB."""
+    try:
+        database = await get_astra_client()
+        
+        if dimension:
+            # Colección vectorial
+            collection = database.create_collection(collection_name, dimension=dimension)
+        else:
+            # Colección normal
+            collection = database.create_collection(collection_name)
+        
+        logger.info(f"Colección '{collection_name}' creada exitosamente")
+        return collection
+        
+    except Exception as e:
+        logger.error(f"Error creando colección '{collection_name}': {e}")
+        raise
+
+
+async def get_collection(collection_name: str):
+    """Obtiene una colección de AstraDB."""
+    try:
+        database = await get_astra_client()
+        collection = database.get_collection(collection_name)
+        return collection
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo colección '{collection_name}': {e}")
+        raise
+
+
+async def insert_document(collection_name: str, document: dict):
+    """Inserta un documento en una colección."""
+    try:
+        collection = await get_collection(collection_name)
+        result = collection.insert_one(document)
+        logger.info(f"Documento insertado en '{collection_name}': {result.inserted_id}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error insertando documento en '{collection_name}': {e}")
+        raise
+
+
+async def find_documents(collection_name: str, filter_dict: dict = None, limit: int = 20):
+    """Busca documentos en una colección."""
+    try:
+        collection = await get_collection(collection_name)
+        
+        if filter_dict:
+            cursor = collection.find(filter_dict, limit=limit)
+        else:
+            cursor = collection.find({}, limit=limit)
+        
+        documents = list(cursor)
+        logger.info(f"Encontrados {len(documents)} documentos en '{collection_name}'")
+        return documents
+
+
+# ============================================================================
+# HELPERS PARA SINCRONIZACIÓN DE OCUPACIÓN POR CIUDAD
+# ============================================================================
+
+async def sync_ocupacion_mark_unavailable(ciudad_id: int, propiedad_id: int, fecha):
+    """
+    Marca una fecha como ocupada en las tablas de Cassandra.
+    Se ejecuta cuando se confirma una reserva o se bloquea manualmente.
+    """
+    try:
+        collection_ciudad = await get_collection("ocupacion_por_ciudad")
+        collection_propiedad = await get_collection("ocupacion_por_propiedad")
+        
+        # 1. Actualizar ocupacion_por_ciudad
+        # Incrementar noches_ocupadas y decrementar noches_disponibles
+        ciudad_filter = {"ciudad_id": ciudad_id, "fecha": fecha.isoformat()}
+        
+        # Buscar registro existente
+        existing_ciudad = await find_documents("ocupacion_por_ciudad", ciudad_filter, limit=1)
+        
+        if existing_ciudad:
+            # Actualizar registro existente
+            doc_id = existing_ciudad[0].get('_id')
+            noches_ocupadas = existing_ciudad[0].get('noches_ocupadas', 0) + 1
+            noches_disponibles = max(0, existing_ciudad[0].get('noches_disponibles', 0) - 1)
+            
+            ciudad_update = {
+                "ciudad_id": ciudad_id,
+                "fecha": fecha.isoformat(),
+                "noches_ocupadas": noches_ocupadas,
+                "noches_disponibles": noches_disponibles
+            }
+            
+            # Usar upsert para actualizar
+            await collection_ciudad.find_one_and_replace(ciudad_filter, ciudad_update, upsert=True)
+        else:
+            # Crear nuevo registro
+            ciudad_doc = {
+                "ciudad_id": ciudad_id,
+                "fecha": fecha.isoformat(),
+                "noches_ocupadas": 1,
+                "noches_disponibles": 0  # Se decrementará cuando haya propiedades disponibles
+            }
+            await collection_ciudad.insert_one(ciudad_doc)
+        
+        # 2. Actualizar ocupacion_por_propiedad
+        propiedad_doc = {
+            "propiedad_id": propiedad_id,
+            "fecha": fecha.isoformat(),
+            "ocupada": True
+        }
+        
+        propiedad_filter = {"propiedad_id": propiedad_id, "fecha": fecha.isoformat()}
+        await collection_propiedad.find_one_and_replace(propiedad_filter, propiedad_doc, upsert=True)
+        
+        logger.debug(f"✅ Cassandra: Fecha {fecha} marcada como ocupada para propiedad {propiedad_id} en ciudad {ciudad_id}")
+        
+    except Exception as e:
+        logger.error(f"❌ Error sincronizando ocupación (marcar ocupada) en Cassandra: {e}")
+        # No interrumpir el flujo principal
+
+
+async def sync_ocupacion_mark_available(ciudad_id: int, propiedad_id: int, fecha):
+    """
+    Marca una fecha como disponible en las tablas de Cassandra.
+    Se ejecuta cuando se cancela una reserva o se libera manualmente.
+    """
+    try:
+        collection_ciudad = await get_collection("ocupacion_por_ciudad")
+        collection_propiedad = await get_collection("ocupacion_por_propiedad")
+        
+        # 1. Actualizar ocupacion_por_ciudad
+        ciudad_filter = {"ciudad_id": ciudad_id, "fecha": fecha.isoformat()}
+        existing_ciudad = await find_documents("ocupacion_por_ciudad", ciudad_filter, limit=1)
+        
+        if existing_ciudad:
+            # Decrementar noches_ocupadas e incrementar noches_disponibles
+            doc_id = existing_ciudad[0].get('_id')
+            noches_ocupadas = max(0, existing_ciudad[0].get('noches_ocupadas', 0) - 1)
+            noches_disponibles = existing_ciudad[0].get('noches_disponibles', 0) + 1
+            
+            ciudad_update = {
+                "ciudad_id": ciudad_id,
+                "fecha": fecha.isoformat(),
+                "noches_ocupadas": noches_ocupadas,
+                "noches_disponibles": noches_disponibles
+            }
+            
+            await collection_ciudad.find_one_and_replace(ciudad_filter, ciudad_update, upsert=True)
+        else:
+            # Crear nuevo registro con disponibilidad
+            ciudad_doc = {
+                "ciudad_id": ciudad_id,
+                "fecha": fecha.isoformat(),
+                "noches_ocupadas": 0,
+                "noches_disponibles": 1
+            }
+            await collection_ciudad.insert_one(ciudad_doc)
+        
+        # 2. Actualizar ocupacion_por_propiedad
+        propiedad_doc = {
+            "propiedad_id": propiedad_id,
+            "fecha": fecha.isoformat(),
+            "ocupada": False
+        }
+        
+        propiedad_filter = {"propiedad_id": propiedad_id, "fecha": fecha.isoformat()}
+        await collection_propiedad.find_one_and_replace(propiedad_filter, propiedad_doc, upsert=True)
+        
+        logger.debug(f"✅ Cassandra: Fecha {fecha} marcada como disponible para propiedad {propiedad_id} en ciudad {ciudad_id}")
+        
+    except Exception as e:
+        logger.error(f"❌ Error sincronizando ocupación (marcar disponible) en Cassandra: {e}")
+        # No interrumpir el flujo principal
+
+
+async def sync_ocupacion_init_date(ciudad_id: int, propiedad_id: int, fecha):
+    """
+    Inicializa una fecha como disponible en las tablas de Cassandra.
+    Se ejecuta durante la generación inicial de disponibilidad.
+    """
+    try:
+        collection_ciudad = await get_collection("ocupacion_por_ciudad")
+        collection_propiedad = await get_collection("ocupacion_por_propiedad")
+        
+        # 1. Actualizar ocupacion_por_ciudad (incrementar disponibles)
+        ciudad_filter = {"ciudad_id": ciudad_id, "fecha": fecha.isoformat()}
+        existing_ciudad = await find_documents("ocupacion_por_ciudad", ciudad_filter, limit=1)
+        
+        if existing_ciudad:
+            # Incrementar noches_disponibles
+            noches_ocupadas = existing_ciudad[0].get('noches_ocupadas', 0)
+            noches_disponibles = existing_ciudad[0].get('noches_disponibles', 0) + 1
+            
+            ciudad_update = {
+                "ciudad_id": ciudad_id,
+                "fecha": fecha.isoformat(),
+                "noches_ocupadas": noches_ocupadas,
+                "noches_disponibles": noches_disponibles
+            }
+            
+            await collection_ciudad.find_one_and_replace(ciudad_filter, ciudad_update, upsert=True)
+        else:
+            # Crear nuevo registro
+            ciudad_doc = {
+                "ciudad_id": ciudad_id,
+                "fecha": fecha.isoformat(),
+                "noches_ocupadas": 0,
+                "noches_disponibles": 1
+            }
+            await collection_ciudad.insert_one(ciudad_doc)
+        
+        # 2. Crear entrada en ocupacion_por_propiedad como disponible
+        propiedad_doc = {
+            "propiedad_id": propiedad_id,
+            "fecha": fecha.isoformat(),
+            "ocupada": False
+        }
+        
+        propiedad_filter = {"propiedad_id": propiedad_id, "fecha": fecha.isoformat()}
+        await collection_propiedad.find_one_and_replace(propiedad_filter, propiedad_doc, upsert=True)
+        
+        logger.debug(f"✅ Cassandra: Fecha {fecha} inicializada para propiedad {propiedad_id} en ciudad {ciudad_id}")
+        
+    except Exception as e:
+        logger.error(f"❌ Error inicializando fecha en Cassandra: {e}")
+        # No interrumpir el flujo principal
+
+
+async def batch_sync_ocupacion_dates(operacion: str, ciudad_id: int, propiedad_id: int, fechas: list):
+    """
+    Sincroniza múltiples fechas en batch para mejorar performance.
+    
+    Args:
+        operacion: "mark_unavailable", "mark_available", "init_date"
+        ciudad_id: ID de la ciudad
+        propiedad_id: ID de la propiedad
+        fechas: Lista de fechas a procesar
+    """
+    try:
+        # Para lotes grandes, procesar en chunks de 50 fechas
+        chunk_size = 50
+        total_fechas = len(fechas)
+        
+        logger.info(f"🔄 Iniciando sincronización batch de {total_fechas} fechas para propiedad {propiedad_id}")
+        
+        for i in range(0, total_fechas, chunk_size):
+            chunk_fechas = fechas[i:i + chunk_size]
+            
+            # Procesar cada fecha del chunk
+            for fecha in chunk_fechas:
+                if operacion == "mark_unavailable":
+                    await sync_ocupacion_mark_unavailable(ciudad_id, propiedad_id, fecha)
+                elif operacion == "mark_available":
+                    await sync_ocupacion_mark_available(ciudad_id, propiedad_id, fecha)
+                elif operacion == "init_date":
+                    await sync_ocupacion_init_date(ciudad_id, propiedad_id, fecha)
+            
+            logger.debug(f"✅ Procesado chunk {i//chunk_size + 1} de {(total_fechas-1)//chunk_size + 1} chunks")
+        
+        logger.info(f"✅ Sincronización batch completada para {total_fechas} fechas")
+        
+    except Exception as e:
+        logger.error(f"❌ Error en sincronización batch: {e}")
+        # No interrumpir el flujo principal
+
+
+async def get_ciudad_id_from_propiedad(propiedad_id: int) -> int:
+    """
+    Obtiene el ciudad_id de una propiedad desde PostgreSQL.
+    Helper para las funciones de sincronización.
+    """
+    try:
+        from db.postgres import execute_query
+        
+        result = await execute_query(
+            "SELECT ciudad_id FROM propiedad WHERE id = $1",
+            propiedad_id
+        )
+        
+        if result and len(result) > 0:
+            return result[0]['ciudad_id']
+        else:
+            logger.error(f"❌ No se encontró ciudad_id para propiedad {propiedad_id}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo ciudad_id para propiedad {propiedad_id}: {e}")
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error buscando documentos en '{collection_name}': {e}")
+        raise
+
+
+async def update_document(collection_name: str, filter_dict: dict, update_data: dict):
+    """Actualiza un documento en una colección."""
+    try:
+        collection = await get_collection(collection_name)
+        result = collection.update_one(filter_dict, {"$set": update_data})
+        logger.info(f"Documento actualizado en '{collection_name}': {result.modified_count} modificados")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error actualizando documento en '{collection_name}': {e}")
+        raise
+
+
+async def delete_document(collection_name: str, filter_dict: dict):
+    """Elimina un documento de una colección."""
+    try:
+        collection = await get_collection(collection_name)
+        result = collection.delete_one(filter_dict)
+        logger.info(f"Documento eliminado de '{collection_name}': {result.deleted_count} eliminados")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error eliminando documento de '{collection_name}': {e}")
+        raise
+
+
+async def count_documents(collection_name: str, filter_dict: dict = None):
+    """Cuenta documentos en una colección."""
+    try:
+        collection = await get_collection(collection_name)
+        
+        if filter_dict:
+            count = collection.count_documents(filter_dict)
+        else:
+            count = collection.count_documents({})
+        
+        logger.info(f"Conteo de documentos en '{collection_name}': {count}")
+        return count
+        
+    except Exception as e:
+        logger.error(f"Error contando documentos en '{collection_name}': {e}")
+        raise
+
+
+async def close_client():
+    """Cierra las conexiones."""
+    global _astra_client, _astra_database
+
+    if _astra_client:
+        # AstraDB se cierra automáticamente
+        _astra_client = None
+        _astra_database = None
+        logger.info("Cliente AstraDB cerrado")
+
+
+# Funciones legacy compatibles
+async def get_client():
+    """Función legacy para compatibilidad."""
+    return await get_astra_client()
+
+
+async def execute_query(query: str, *args):
+    """Función legacy para compatibilidad."""
+    logger.warning("execute_query no es compatible con AstraDB DataAPI. Use las funciones de colección.")
+    raise NotImplementedError("Use create_collection, insert_document, find_documents, etc.")
+
+
+# ============================================================================
+# HELPERS PARA SINCRONIZACIÓN DE DISPONIBILIDAD CON POSTGRES
+# ============================================================================
+
+async def cassandra_mark_unavailable(propiedad_id: int, fechas: list):
+    """
+    Marca fechas como no disponibles en Cassandra.
+    Decrementa noches_disponibles e incrementa noches_ocupadas.
+    """
+    try:
+        from datetime import date
+        
+        # Obtener ciudad_id de PostgreSQL
+        ciudad_id = await get_ciudad_id_for_propiedad(propiedad_id)
+        if not ciudad_id:
+            logger.warning(f"No se encontró ciudad_id para propiedad {propiedad_id}")
+            return
+
+        for fecha in fechas:
+            await _update_ocupacion_ciudad(ciudad_id, fecha, occupied_delta=1, available_delta=-1)
+            await _update_ocupacion_propiedad(propiedad_id, fecha, ocupada=True)
+            
+        logger.info(f"Cassandra: {len(fechas)} fechas marcadas como no disponibles para propiedad {propiedad_id}")
+        
+    except Exception as e:
+        logger.error(f"Error en cassandra_mark_unavailable: {e}")
+
+
+async def cassandra_mark_available(propiedad_id: int, fechas: list):
+    """
+    Marca fechas como disponibles en Cassandra.
+    Incrementa noches_disponibles y decrementa noches_ocupadas.
+    """
+    try:
+        # Obtener ciudad_id de PostgreSQL
+        ciudad_id = await get_ciudad_id_for_propiedad(propiedad_id)
+        if not ciudad_id:
+            logger.warning(f"No se encontró ciudad_id para propiedad {propiedad_id}")
+            return
+
+        for fecha in fechas:
+            await _update_ocupacion_ciudad(ciudad_id, fecha, occupied_delta=-1, available_delta=1)
+            await _update_ocupacion_propiedad(propiedad_id, fecha, ocupada=False)
+            
+        logger.info(f"Cassandra: {len(fechas)} fechas marcadas como disponibles para propiedad {propiedad_id}")
+        
+    except Exception as e:
+        logger.error(f"Error en cassandra_mark_available: {e}")
+
+
+async def cassandra_init_date(propiedad_id: int, fechas: list):
+    """
+    Inicializa fechas disponibles en Cassandra para una nueva propiedad.
+    """
+    try:
+        # Obtener ciudad_id de PostgreSQL
+        ciudad_id = await get_ciudad_id_for_propiedad(propiedad_id)
+        if not ciudad_id:
+            logger.warning(f"No se encontró ciudad_id para propiedad {propiedad_id}")
+            return
+
+        for fecha in fechas:
+            await _update_ocupacion_ciudad(ciudad_id, fecha, occupied_delta=0, available_delta=1)
+            await _update_ocupacion_propiedad(propiedad_id, fecha, ocupada=False)
+            
+        logger.info(f"Cassandra: {len(fechas)} fechas inicializadas para propiedad {propiedad_id}")
+        
+    except Exception as e:
+        logger.error(f"Error en cassandra_init_date: {e}")
+
+
+async def get_ciudad_id_for_propiedad(propiedad_id: int):
+    """Obtiene el ciudad_id de una propiedad desde PostgreSQL."""
+    try:
+        from db.postgres import get_client as get_postgres_client
+        
+        pool = await get_postgres_client()
+        result = await pool.fetchrow(
+            "SELECT ciudad_id FROM propiedad WHERE id = $1", 
+            propiedad_id
+        )
+        
+        return result['ciudad_id'] if result else None
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo ciudad_id para propiedad {propiedad_id}: {e}")
+        return None
+
+
+async def _update_ocupacion_ciudad(ciudad_id: int, fecha, occupied_delta: int, available_delta: int):
+    """Actualiza métricas de ocupación por ciudad."""
+    try:
+        collection = await get_collection("ocupacion_por_ciudad")
+        
+        fecha_str = fecha.isoformat() if hasattr(fecha, 'isoformat') else str(fecha)
+        filter_doc = {"ciudad_id": ciudad_id, "fecha": fecha_str}
+        
+        # Buscar documento existente
+        existing = await find_documents("ocupacion_por_ciudad", filter_doc, limit=1)
+        
+        if existing:
+            doc = existing[0]
+            noches_ocupadas = max(0, doc.get('noches_ocupadas', 0) + occupied_delta)
+            noches_disponibles = max(0, doc.get('noches_disponibles', 0) + available_delta)
+        else:
+            noches_ocupadas = max(0, occupied_delta)
+            noches_disponibles = max(0, available_delta)
+        
+        update_doc = {
+            "ciudad_id": ciudad_id,
+            "fecha": fecha_str,
+            "noches_ocupadas": noches_ocupadas,
+            "noches_disponibles": noches_disponibles
+        }
+        
+        await collection.find_one_and_replace(filter_doc, update_doc, upsert=True)
+        
+    except Exception as e:
+        logger.error(f"Error actualizando ocupación ciudad: {e}")
+
+
+async def _update_ocupacion_propiedad(propiedad_id: int, fecha, ocupada: bool):
+    """Actualiza estado de ocupación por propiedad."""
+    try:
+        collection = await get_collection("ocupacion_por_propiedad")
+        
+        fecha_str = fecha.isoformat() if hasattr(fecha, 'isoformat') else str(fecha)
+        filter_doc = {"propiedad_id": propiedad_id, "fecha": fecha_str}
+        
+        update_doc = {
+            "propiedad_id": propiedad_id,
+            "fecha": fecha_str,
+            "ocupada": ocupada
+        }
+        
+        await collection.find_one_and_replace(filter_doc, update_doc, upsert=True)
+        
+    except Exception as e:
+        logger.error(f"Error actualizando ocupación propiedad: {e}")

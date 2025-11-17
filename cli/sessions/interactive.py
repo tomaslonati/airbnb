@@ -56,6 +56,7 @@ async def show_main_menu(user_profile: UserProfile) -> str:
     options = [
         "👤 Ver mi perfil",
         "🔑 Ver sesiones activas",
+        "🗃️ Comandos Cassandra (CU 4-6)",
         "🚪 Cerrar sesión",
         "❌ Salir del sistema"
     ]
@@ -80,6 +81,8 @@ async def show_main_menu(user_profile: UserProfile) -> str:
                     return "profile"
                 elif "sesiones activas" in options[choice-1]:
                     return "sessions"
+                elif "Comandos Cassandra" in options[choice-1]:
+                    return "cassandra"
                 elif "Cerrar sesión" in options[choice-1]:
                     return "logout"
                 elif "estadísticas MongoDB" in options[choice-1]:

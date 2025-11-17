@@ -16,9 +16,15 @@ class DatabaseConfig(BaseSettings):
     
     model_config = ConfigDict(extra='ignore')
 
-    # AstraDB/Cassandra
+    # AstraDB/Cassandra - DataAPI
     astra_db_token: str = os.getenv("ASTRA_DB_TOKEN", "")
     astra_db_endpoint: str = os.getenv("ASTRA_DB_ENDPOINT", "")
+
+    # Cassandra CQL - Para reservas
+    cassandra_host: str = os.getenv("CASSANDRA_HOST", "localhost")
+    cassandra_port: int = int(os.getenv("CASSANDRA_PORT", "9042"))
+    cassandra_username: str = os.getenv("CASSANDRA_USERNAME", "cassandra")
+    cassandra_password: str = os.getenv("CASSANDRA_PASSWORD", "cassandra")
 
     # Neo4j AuraDB
     neo4j_uri: str = os.getenv("NEO4J_URI", "")

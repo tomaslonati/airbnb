@@ -269,10 +269,8 @@ async def _add_propiedad_disponible(fecha, propiedad_id: int, ciudad_id: int):
             "fecha": fecha_str,
             "propiedad_id": propiedad_id,
             "ciudad_id": ciudad_id,
-            "titulo": propiedad_data.get('titulo', ''),
-            "precio_noche": propiedad_data.get('precio_noche', 0),
+            "nombre": propiedad_data.get('nombre', ''),
             "capacidad": propiedad_data.get('capacidad', 1),
-            "tipo_propiedad": propiedad_data.get('tipo_propiedad', ''),
             "disponible": True
         }
         
@@ -304,16 +302,13 @@ async def _add_reserva_por_host(host_id: int, fecha, reserva_id: int, reserva_da
         fecha_str = fecha.isoformat() if hasattr(fecha, 'isoformat') else str(fecha)
         
         new_doc = {
-            "host_id": host_id,
+            "host_id": str(host_id),  # Convert to UUID string
             "fecha": fecha_str,
-            "reserva_id": reserva_id,
-            "propiedad_id": reserva_data.get('propiedad_id'),
-            "huesped_id": reserva_data.get('huesped_id'),
-            "fecha_inicio": reserva_data.get('fecha_inicio', ''),
-            "fecha_fin": reserva_data.get('fecha_fin', ''),
-            "estado": reserva_data.get('estado', 'confirmada'),
-            "precio_total": reserva_data.get('precio_total', 0),
-            "created_at": reserva_data.get('created_at', '')
+            "reserva_id": str(reserva_id),  # Convert to UUID string  
+            "propiedad_id": str(reserva_data.get('propiedad_id')),  # Convert to UUID string
+            "huesped_id": str(reserva_data.get('huesped_id')),  # Convert to UUID string
+            "status": reserva_data.get('estado', 'confirmada'),  # Map estado -> status
+            "total_price": float(reserva_data.get('precio_total', 0))  # Map precio_total -> total_price
         }
         
         collection.insert_one(new_doc)
@@ -328,7 +323,7 @@ async def _remove_reserva_por_host(host_id: int, fecha, reserva_id: int):
         collection = await get_collection("reservas_por_host_fecha")
         
         fecha_str = fecha.isoformat() if hasattr(fecha, 'isoformat') else str(fecha)
-        filter_doc = {"host_id": host_id, "fecha": fecha_str, "reserva_id": reserva_id}
+        filter_doc = {"host_id": str(host_id), "fecha": fecha_str, "reserva_id": str(reserva_id)}
         
         collection.delete_one(filter_doc)
         
@@ -385,7 +380,7 @@ async def _get_propiedad_data(propiedad_id: int):
         pool = await get_postgres_client()
         result = await pool.fetchrow(
             """
-            SELECT titulo, precio_noche, capacidad, tipo_propiedad 
+            SELECT nombre, capacidad
             FROM propiedad 
             WHERE id = $1
             """, 

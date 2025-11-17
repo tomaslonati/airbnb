@@ -378,7 +378,7 @@ def buscar_propiedades_disponibles(
                     typer.echo("\n" + "="*80)
                     for prop in propiedades:
                         typer.echo(f"🏠 ID: {prop.get('propiedad_id')}")
-                        typer.echo(f"   📝 Título: {prop.get('titulo', 'Sin título')}")
+                        typer.echo(f"   📝 Nombre: {prop.get('nombre', 'Sin nombre')}")
                         typer.echo(f"   💰 Precio: ${prop.get('precio_noche', 0)}/noche")
                         typer.echo(f"   👥 Capacidad: {prop.get('capacidad', 1)} persona(s)")
                         typer.echo(f"   🏡 Tipo: {prop.get('tipo_propiedad', 'No especificado')}")

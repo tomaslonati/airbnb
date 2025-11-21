@@ -3,6 +3,8 @@
 Script para validar que el CU3 encuentra las propiedades recién creadas.
 """
 
+from utils.logging import configure_logging, get_logger
+from services.reservations import ReservationService
 import asyncio
 import sys
 from pathlib import Path
@@ -10,8 +12,6 @@ from pathlib import Path
 # Agregar el directorio raíz al path
 sys.path.append(str(Path(__file__).parent))
 
-from services.reservations import ReservationService
-from utils.logging import configure_logging, get_logger
 
 # Configurar logging
 configure_logging()
@@ -37,32 +37,36 @@ async def test_cu3_encuentra_nuevas_propiedades():
         if resultado_cu3.get("success"):
             propiedades_cu3 = resultado_cu3.get("propiedades", [])
             total = resultado_cu3.get("total", 0)
-            
+
             print(f"📊 Encontradas {total} propiedades:")
-            
+
             for i, propiedad in enumerate(propiedades_cu3, 1):
                 print(f"   {i}. ID: {propiedad.get('propiedad_id')}")
                 print(f"      Nombre: {propiedad.get('propiedad_nombre')}")
-                print(f"      Capacidad: {propiedad.get('capacidad_huespedes')}")
+                print(
+                    f"      Capacidad: {propiedad.get('capacidad_huespedes')}")
                 print(f"      WiFi: {propiedad.get('wifi')}")
                 print(f"      Ciudad: {propiedad.get('ciudad_nombre')}")
-                
+
                 # Verificar que cumple criterios
                 capacidad = propiedad.get('capacidad_huespedes', 0)
                 tiene_wifi = propiedad.get('wifi', False)
-                
+
                 if capacidad >= 3 and tiene_wifi:
                     print(f"      ✅ Cumple criterios CU3")
                 else:
-                    print(f"      ❌ NO cumple criterios CU3 (cap:{capacidad}, wifi:{tiene_wifi})")
+                    print(
+                        f"      ❌ NO cumple criterios CU3 (cap:{capacidad}, wifi:{tiene_wifi})")
                 print()
 
             # Verificar que se incluye la propiedad recién creada (ID 49)
             ids_encontrados = [p.get('propiedad_id') for p in propiedades_cu3]
             if 49 in ids_encontrados:
-                print("🎯 ✅ La propiedad recién creada (ID 49) aparece en los resultados CU3")
+                print(
+                    "🎯 ✅ La propiedad recién creada (ID 49) aparece en los resultados CU3")
             else:
-                print("❌ La propiedad recién creada (ID 49) NO aparece en los resultados CU3")
+                print(
+                    "❌ La propiedad recién creada (ID 49) NO aparece en los resultados CU3")
                 print(f"   IDs encontrados: {ids_encontrados}")
 
         else:

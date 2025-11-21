@@ -19,12 +19,12 @@ logger = get_logger(__name__)
 
 class CassandraSchemaInitializer:
     """Inicializa el schema de Cassandra para el sistema de reservas."""
-    
+
     def __init__(self):
         self.cluster = None
         self.session = None
         self.keyspace = "default_keyspace"
-    
+
     async def connect(self):
         """Conecta con Cassandra."""
         try:
@@ -32,20 +32,21 @@ class CassandraSchemaInitializer:
                 username=db_config.cassandra_username,
                 password=db_config.cassandra_password
             )
-            
+
             self.cluster = Cluster(
                 contact_points=[db_config.cassandra_host],
                 port=db_config.cassandra_port,
                 auth_provider=auth_provider
             )
-            
+
             self.session = self.cluster.connect()
-            logger.info(f"✅ Conectado a Cassandra en {db_config.cassandra_host}:{db_config.cassandra_port}")
-            
+            logger.info(
+                f"✅ Conectado a Cassandra en {db_config.cassandra_host}:{db_config.cassandra_port}")
+
         except Exception as e:
             logger.error(f"❌ Error conectando a Cassandra: {e}")
             raise
-    
+
     async def create_keyspace(self):
         """Crea el keyspace si no existe."""
         try:
@@ -56,16 +57,16 @@ class CassandraSchemaInitializer:
                     'replication_factor': 3
                 }}
             """
-            
+
             self.session.execute(cql)
             self.session.set_keyspace(self.keyspace)
-            
+
             logger.info(f"✅ Keyspace '{self.keyspace}' creado/verificado")
-            
+
         except Exception as e:
             logger.error(f"❌ Error creando keyspace: {e}")
             raise
-    
+
     async def create_tables(self):
         """Crea todas las tablas necesarias."""
         tables = [
@@ -73,7 +74,7 @@ class CassandraSchemaInitializer:
             self._get_propiedades_disponibles_por_fecha_cql(),
             self._get_reservas_por_host_fecha_cql()
         ]
-        
+
         for table_name, cql in tables:
             try:
                 self.session.execute(cql)
@@ -81,22 +82,22 @@ class CassandraSchemaInitializer:
             except Exception as e:
                 logger.error(f"❌ Error creando tabla '{table_name}': {e}")
                 raise
-    
+
     def _get_ocupacion_por_ciudad_cql(self):
         """CQL para crear la tabla de ocupación por ciudad."""
         return "ocupacion_por_ciudad", """
             CREATE TABLE IF NOT EXISTS ocupacion_por_ciudad (
-                ciudad_id int,
+                ciudad_id bigint,
                 fecha date,
-                noches_ocupadas counter,
-                noches_disponibles counter,
+                noches_ocupadas int,
+                noches_disponibles int,
                 PRIMARY KEY (ciudad_id, fecha)
-            ) WITH CLUSTERING ORDER BY (fecha DESC)
-            AND comment = 'Métricas de ocupación de propiedades por ciudad y fecha'
+            ) WITH CLUSTERING ORDER BY (fecha ASC)
+            AND comment = 'Datos agregados de ocupación: una fila por (ciudad, fecha)'
         """
-    
+
     def _get_propiedades_disponibles_por_fecha_cql(self):
-        """CQL para crear la tabla de disponibilidad de propiedades.""" 
+        """CQL para crear la tabla de disponibilidad de propiedades."""
         return "propiedades_disponibles_por_fecha", """
             CREATE TABLE IF NOT EXISTS propiedades_disponibles_por_fecha (
                 fecha date,
@@ -107,7 +108,7 @@ class CassandraSchemaInitializer:
             ) WITH CLUSTERING ORDER BY (propiedad_id ASC)
             AND comment = 'Estado de disponibilidad de propiedades por fecha específica'
         """
-    
+
     def _get_reservas_por_host_fecha_cql(self):
         """CQL para crear la tabla de reservas por host."""
         return "reservas_por_host_fecha", """
@@ -123,7 +124,7 @@ class CassandraSchemaInitializer:
             ) WITH CLUSTERING ORDER BY (fecha DESC, reserva_id ASC)
             AND comment = 'Reservas organizadas por anfitrión y fecha para análisis'
         """
-    
+
     async def close(self):
         """Cierra la conexión."""
         try:
@@ -139,20 +140,20 @@ class CassandraSchemaInitializer:
 async def initialize_cassandra_schema():
     """Función principal para inicializar el schema."""
     initializer = CassandraSchemaInitializer()
-    
+
     try:
         await initializer.connect()
         await initializer.create_keyspace()
         await initializer.create_tables()
-        
+
         logger.info("🎉 Schema de Cassandra inicializado exitosamente")
         print("✅ Schema de Cassandra para reservas configurado correctamente")
-        
+
     except Exception as e:
         logger.error(f"❌ Error inicializando schema: {e}")
         print(f"❌ Error: {e}")
         raise
-    
+
     finally:
         await initializer.close()
 

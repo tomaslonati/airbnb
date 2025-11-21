@@ -414,7 +414,7 @@ class PropertyService:
 
                         # CORRECCIÓN: Ejecutar operaciones SECUENCIALMENTE dentro de la transacción
                         # (No podemos paralelizar operaciones que usan la misma conexión DB)
-                        
+
                         if amenities:
                             await self._add_amenities(conn, propiedad_id, amenities)
                         if servicios:
@@ -427,9 +427,10 @@ class PropertyService:
                             await self._generate_availability(
                                 conn, propiedad_id, dias_calendario, ciudad_id
                             )
-                            
+
                 except Exception as tx_error:
-                    logger.error(f"Error en transacción de creación: {tx_error}")
+                    logger.error(
+                        f"Error en transacción de creación: {tx_error}")
                     # La transacción se revierte automáticamente
                     raise
 
@@ -443,22 +444,27 @@ class PropertyService:
                     # Importar aquí para evitar import circular
                     import asyncio
                     from db.cassandra import cassandra_init_date
-                    
+
                     # Validar que tenemos datos válidos
                     if prop_id and fechas_cassandra and ciudad_id_cassandra:
                         # Sync en segundo plano para no bloquear la respuesta
                         if len(fechas_cassandra) <= 30:
                             await cassandra_init_date(prop_id, fechas_cassandra, ciudad_id_cassandra)
-                            logger.info(f"✅ Cassandra sincronizada para propiedad {prop_id}")
+                            logger.info(
+                                f"✅ Cassandra sincronizada para propiedad {prop_id}")
                         else:
                             # Para volúmenes grandes, ejecutar en background
-                            asyncio.create_task(self._sync_cassandra_background(prop_id, fechas_cassandra, ciudad_id_cassandra))
-                            logger.info(f"🚀 Cassandra ({len(fechas_cassandra)} fechas) se sincronizará en segundo plano")
+                            asyncio.create_task(self._sync_cassandra_background(
+                                prop_id, fechas_cassandra, ciudad_id_cassandra))
+                            logger.info(
+                                f"🚀 Cassandra ({len(fechas_cassandra)} fechas) se sincronizará en segundo plano")
                     else:
-                        logger.warning("⚠️  Datos de Cassandra incompletos, omitiendo sincronización")
-                        
+                        logger.warning(
+                            "⚠️  Datos de Cassandra incompletos, omitiendo sincronización")
+
                 except Exception as cassandra_error:
-                    logger.warning(f"⚠️  Error en sync Cassandra (no crítico): {cassandra_error}")
+                    logger.warning(
+                        f"⚠️  Error en sync Cassandra (no crítico): {cassandra_error}")
                 finally:
                     # Limpiar datos pendientes
                     self._cassandra_fechas_pendientes = None
@@ -474,13 +480,15 @@ class PropertyService:
                     servicios_ids=servicios or []
                 )
             except Exception as cu3_error:
-                logger.warning(f"⚠️  Error en sync CU3 Cassandra (no crítico): {cu3_error}")
+                logger.warning(
+                    f"⚠️  Error en sync CU3 Cassandra (no crítico): {cu3_error}")
 
             # CU 8: Invalidar cache de búsquedas para la ciudad
             try:
                 from services.search import invalidate_search_cache_for_city
                 await invalidate_search_cache_for_city(ciudad_id)
-                logger.info(f"[CU8] Cache invalidado para ciudad_id {ciudad_id} después de crear propiedad")
+                logger.info(
+                    f"[CU8] Cache invalidado para ciudad_id {ciudad_id} después de crear propiedad")
             except Exception as cache_error:
                 logger.warning(f"[CU8] Error invalidando cache: {cache_error}")
                 # No fallar la creación de propiedad por error de cache
@@ -504,20 +512,21 @@ class PropertyService:
         try:
             if not amenity_ids:
                 return
-                
+
             # OPTIMIZACIÓN: Construir query con VALUES múltiples para mejor rendimiento
-            values_placeholder = ",".join([f"(${i*2+1}, ${i*2+2})" for i in range(len(amenity_ids))])
+            values_placeholder = ",".join(
+                [f"(${i*2+1}, ${i*2+2})" for i in range(len(amenity_ids))])
             query = f"""
                 INSERT INTO propiedad_amenity (propiedad_id, amenity_id)
                 VALUES {values_placeholder}
                 ON CONFLICT DO NOTHING
             """
-            
+
             # Aplanar los datos para la query
             query_args = []
             for amenity_id in amenity_ids:
                 query_args.extend([propiedad_id, amenity_id])
-            
+
             await conn.execute(query, *query_args)
 
             logger.info(
@@ -531,20 +540,21 @@ class PropertyService:
         try:
             if not servicio_ids:
                 return
-                
+
             # OPTIMIZACIÓN: Construir query con VALUES múltiples
-            values_placeholder = ",".join([f"(${i*2+1}, ${i*2+2})" for i in range(len(servicio_ids))])
+            values_placeholder = ",".join(
+                [f"(${i*2+1}, ${i*2+2})" for i in range(len(servicio_ids))])
             query = f"""
                 INSERT INTO propiedad_servicio (propiedad_id, servicio_id)
                 VALUES {values_placeholder}
                 ON CONFLICT DO NOTHING
             """
-            
+
             # Aplanar los datos para la query
             query_args = []
             for servicio_id in servicio_ids:
                 query_args.extend([propiedad_id, servicio_id])
-            
+
             await conn.execute(query, *query_args)
 
             logger.info(
@@ -558,20 +568,21 @@ class PropertyService:
         try:
             if not regla_ids:
                 return
-                
+
             # OPTIMIZACIÓN: Construir query con VALUES múltiples
-            values_placeholder = ",".join([f"(${i*2+1}, ${i*2+2})" for i in range(len(regla_ids))])
+            values_placeholder = ",".join(
+                [f"(${i*2+1}, ${i*2+2})" for i in range(len(regla_ids))])
             query = f"""
                 INSERT INTO propiedad_regla (propiedad_id, regla_id)
                 VALUES {values_placeholder}
                 ON CONFLICT DO NOTHING
             """
-            
+
             # Aplanar los datos para la query
             query_args = []
             for regla_id in regla_ids:
                 query_args.extend([propiedad_id, regla_id])
-            
+
             await conn.execute(query, *query_args)
 
             logger.info(
@@ -599,7 +610,7 @@ class PropertyService:
             # Preparar todos los datos en memoria primero
             fechas_data = []
             fechas_cassandra = []
-            
+
             for i in range(dias):
                 fecha = fecha_inicio + timedelta(days=i)
                 fechas_data.append((propiedad_id, fecha, tarifa_base))
@@ -611,27 +622,32 @@ class PropertyService:
                 VALUES ($1, $2, $3, true)
                 ON CONFLICT DO NOTHING
             """
-            
-            logger.info(f"📦 Insertando {len(fechas_data)} fechas en PostgreSQL")
-            
+
+            logger.info(
+                f"📦 Insertando {len(fechas_data)} fechas en PostgreSQL")
+
             try:
                 # Una sola operación executemany para evitar problemas de transacción
                 await conn.executemany(query, fechas_data)
-                logger.info(f"✅ PostgreSQL: {dias} fechas insertadas exitosamente")
-                
+                logger.info(
+                    f"✅ PostgreSQL: {dias} fechas insertadas exitosamente")
+
             except Exception as db_error:
                 logger.error(f"❌ Error insertando fechas: {db_error}")
                 raise  # Re-levantar para que se revierta la transacción
-            
-            logger.info(f"📅 Calendario de {dias} días generado para propiedad {propiedad_id}")
+
+            logger.info(
+                f"📅 Calendario de {dias} días generado para propiedad {propiedad_id}")
 
             # SIMPLIFICACIÓN: Cassandra sync después de que se complete la transacción principal
             # Esto se ejecutará FUERA de la transacción para evitar conflictos
             if ciudad_id is not None:
-                self._cassandra_fechas_pendientes = (propiedad_id, fechas_cassandra, ciudad_id)
+                self._cassandra_fechas_pendientes = (
+                    propiedad_id, fechas_cassandra, ciudad_id)
             else:
-                logger.warning(f"⚠️  No se puede sincronizar Cassandra: ciudad_id no proporcionado para propiedad {propiedad_id}")
-            
+                logger.warning(
+                    f"⚠️  No se puede sincronizar Cassandra: ciudad_id no proporcionado para propiedad {propiedad_id}")
+
             async def sync_cassandra():
                 """Sincroniza con Cassandra en segundo plano."""
                 try:
@@ -642,7 +658,7 @@ class PropertyService:
                 except Exception as cassandra_error:
                     logger.warning(
                         f"⚠️  Cassandra sync falló (no crítico): {cassandra_error}")
-            
+
             # Ejecutar Cassandra en segundo plano si hay muchas fechas
             if len(fechas_cassandra) > 30:
                 # Para volúmenes grandes, hacer sync asíncrono
@@ -990,6 +1006,8 @@ class PropertyService:
         try:
             from db.cassandra import cassandra_init_date
             await cassandra_init_date(propiedad_id, fechas, ciudad_id)
-            logger.info(f"✅ Cassandra background sync completado para propiedad {propiedad_id}")
+            logger.info(
+                f"✅ Cassandra background sync completado para propiedad {propiedad_id}")
         except Exception as e:
-            logger.warning(f"⚠️  Cassandra background sync falló para propiedad {propiedad_id}: {e}")
+            logger.warning(
+                f"⚠️  Cassandra background sync falló para propiedad {propiedad_id}: {e}")

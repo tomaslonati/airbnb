@@ -19,32 +19,32 @@ _neo4j_driver: Optional = None
 def resolve_neo4j_uri():
     """Resuelve la URI de Neo4j con fallback DNS."""
     original_uri = db_config.neo4j_uri
-    
+
     if not original_uri:
         logger.error("Neo4j URI no configurada")
         return None
-        
+
     # Extraer el hostname de la URI y convertir esquema
     match = re.match(r'(neo4j\+s?://)([^:]+)(.*)', original_uri)
     if not match:
         logger.error(f"URI Neo4j inválida: {original_uri}")
         return original_uri
-        
+
     protocol, hostname, rest = match.groups()
-    
+
     # Convertir neo4j+s a bolt+s para compatibilidad con configuraciones SSL
     if protocol.startswith('neo4j+s'):
         protocol = 'bolt+s://'
-    
+
     try:
         # Intentar resolver DNS normal
         socket.gethostbyname(hostname)
         logger.info(f"DNS resuelto correctamente para {hostname}")
         return f"{protocol}{hostname}{rest}"
-        
+
     except socket.gaierror as e:
         logger.warning(f"Error DNS para {hostname}: {e}")
-        
+
         if db_config.neo4j_enable_fallback:
             # Usar IP de fallback
             fallback_uri = f"{protocol}{db_config.neo4j_fallback_ip}{rest}"
@@ -82,11 +82,13 @@ async def get_client():
             try:
                 await asyncio.wait_for(
                     asyncio.get_event_loop().run_in_executor(
-                        None, lambda: _neo4j_driver.execute_query("RETURN 1 as test")
-                    ), 
+                        None, lambda: _neo4j_driver.execute_query(
+                            "RETURN 1 as test")
+                    ),
                     timeout=3.0
                 )
-                logger.info(f"Driver Neo4j creado exitosamente con URI: {neo4j_uri}")
+                logger.info(
+                    f"Driver Neo4j creado exitosamente con URI: {neo4j_uri}")
             except asyncio.TimeoutError:
                 logger.warning("Timeout en test de conexión Neo4j")
                 _neo4j_driver.close()
@@ -117,11 +119,11 @@ def is_available():
     """Verifica si Neo4j está disponible con timeout rápido."""
     try:
         import time
-        
+
         neo4j_uri = resolve_neo4j_uri()
         if not neo4j_uri:
             return False
-        
+
         start_time = time.time()
         driver = GraphDatabase.driver(
             neo4j_uri,
@@ -132,7 +134,7 @@ def is_available():
         # Test súper rápido
         driver.execute_query("RETURN 1 as test")
         driver.close()
-        
+
         elapsed = time.time() - start_time
         logger.info(f"Neo4j disponible en {elapsed:.2f}s")
         return True
@@ -148,7 +150,7 @@ def quick_check():
         original_uri = db_config.neo4j_uri
         if not original_uri:
             return False
-            
+
         # Solo verificar si podemos resolver el hostname
         match = re.match(r'neo4j\+s://([^:]+)', original_uri)
         if match:
@@ -157,7 +159,7 @@ def quick_check():
             logger.info("Neo4j quick check: DNS OK")
             return True
         return False
-        
+
     except Exception as e:
         logger.warning(f"Neo4j quick check failed: {e}")
         return False

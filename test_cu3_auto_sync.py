@@ -3,6 +3,9 @@
 Script para probar que las propiedades que cumplen criterios CU3 se sincronicen automáticamente con Cassandra.
 """
 
+from utils.logging import configure_logging, get_logger
+from db.cassandra import find_documents, get_astra_client
+from services.properties import PropertyService
 import asyncio
 import sys
 from pathlib import Path
@@ -10,9 +13,6 @@ from pathlib import Path
 # Agregar el directorio raíz al path
 sys.path.append(str(Path(__file__).parent))
 
-from services.properties import PropertyService
-from db.cassandra import find_documents, get_astra_client
-from utils.logging import configure_logging, get_logger
 
 # Configurar logging
 configure_logging()
@@ -53,18 +53,21 @@ async def test_cu3_auto_sync():
         if propiedad_cu3_si.get("success"):
             prop_id_1 = propiedad_cu3_si["property_id"]
             print(f"✅ Propiedad creada: ID {prop_id_1}")
-            
+
             # Verificar que se agregó a CU3
             await asyncio.sleep(0.5)  # Pequeña pausa para sincronización
             docs_cu3_si = await find_documents("properties_by_city_wifi_capacity", {"propiedad_id": prop_id_1})
             if docs_cu3_si:
-                print(f"🎯 ✅ Propiedad {prop_id_1} agregada automáticamente a CU3")
+                print(
+                    f"🎯 ✅ Propiedad {prop_id_1} agregada automáticamente a CU3")
                 doc = docs_cu3_si[0]
-                print(f"   📄 Datos: ciudad={doc.get('ciudad_nombre')}, capacidad={doc.get('capacidad')}, wifi={doc.get('tiene_wifi')}")
+                print(
+                    f"   📄 Datos: ciudad={doc.get('ciudad_nombre')}, capacidad={doc.get('capacidad')}, wifi={doc.get('tiene_wifi')}")
             else:
                 print(f"❌ Propiedad {prop_id_1} NO se agregó a CU3")
         else:
-            print(f"❌ Error creando propiedad CU3-SÍ: {propiedad_cu3_si.get('error')}")
+            print(
+                f"❌ Error creando propiedad CU3-SÍ: {propiedad_cu3_si.get('error')}")
 
         # Caso 2: Crear propiedad que NO cumple criterios CU3 (capacidad <3)
         print(f"\n🏠 CASO 2: Propiedad que NO cumple CU3 (capacidad=2, WiFi=Sí)")
@@ -86,16 +89,19 @@ async def test_cu3_auto_sync():
         if propiedad_cu3_no_cap.get("success"):
             prop_id_2 = propiedad_cu3_no_cap["property_id"]
             print(f"✅ Propiedad creada: ID {prop_id_2}")
-            
+
             # Verificar que NO se agregó a CU3
             await asyncio.sleep(0.5)
             docs_cu3_no_cap = await find_documents("properties_by_city_wifi_capacity", {"propiedad_id": prop_id_2})
             if not docs_cu3_no_cap:
-                print(f"🎯 ✅ Propiedad {prop_id_2} NO agregada a CU3 (correcto, capacidad <3)")
+                print(
+                    f"🎯 ✅ Propiedad {prop_id_2} NO agregada a CU3 (correcto, capacidad <3)")
             else:
-                print(f"❌ Propiedad {prop_id_2} se agregó incorrectamente a CU3")
+                print(
+                    f"❌ Propiedad {prop_id_2} se agregó incorrectamente a CU3")
         else:
-            print(f"❌ Error creando propiedad NO-CU3: {propiedad_cu3_no_cap.get('error')}")
+            print(
+                f"❌ Error creando propiedad NO-CU3: {propiedad_cu3_no_cap.get('error')}")
 
         # Caso 3: Crear propiedad que NO cumple criterios CU3 (sin WiFi)
         print(f"\n🏠 CASO 3: Propiedad que NO cumple CU3 (capacidad=5, WiFi=No)")
@@ -117,16 +123,19 @@ async def test_cu3_auto_sync():
         if propiedad_cu3_no_wifi.get("success"):
             prop_id_3 = propiedad_cu3_no_wifi["property_id"]
             print(f"✅ Propiedad creada: ID {prop_id_3}")
-            
+
             # Verificar que NO se agregó a CU3
             await asyncio.sleep(0.5)
             docs_cu3_no_wifi = await find_documents("properties_by_city_wifi_capacity", {"propiedad_id": prop_id_3})
             if not docs_cu3_no_wifi:
-                print(f"🎯 ✅ Propiedad {prop_id_3} NO agregada a CU3 (correcto, sin WiFi)")
+                print(
+                    f"🎯 ✅ Propiedad {prop_id_3} NO agregada a CU3 (correcto, sin WiFi)")
             else:
-                print(f"❌ Propiedad {prop_id_3} se agregó incorrectamente a CU3")
+                print(
+                    f"❌ Propiedad {prop_id_3} se agregó incorrectamente a CU3")
         else:
-            print(f"❌ Error creando propiedad NO-CU3-WiFi: {propiedad_cu3_no_wifi.get('error')}")
+            print(
+                f"❌ Error creando propiedad NO-CU3-WiFi: {propiedad_cu3_no_wifi.get('error')}")
 
         # Verificar estado final
         print(f"\n📊 RESUMEN FINAL:")

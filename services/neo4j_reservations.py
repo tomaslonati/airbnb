@@ -297,10 +297,11 @@ class Neo4jReservationService:
 
         except Exception as e:
             logger.error(f"Error obteniendo todas las comunidades: {str(e)}")
-            
+
             # 🔄 FALLBACK: Datos de demostración cuando Neo4j no está disponible
-            logger.info("🔄 Neo4j no disponible, usando datos de demostración para CU 10")
-            
+            logger.info(
+                "🔄 Neo4j no disponible, usando datos de demostración para CU 10")
+
             demo_communities = [
                 {
                     "guest_id": 14,
@@ -338,22 +339,25 @@ class Neo4jReservationService:
                     "last_interaction_date": "2025-11-16"
                 }
             ]
-            
+
             # Filtrar por min_interactions
-            filtered_communities = [c for c in demo_communities if c['total_interactions'] >= min_interactions]
-            
+            filtered_communities = [
+                c for c in demo_communities if c['total_interactions'] >= min_interactions]
+
             # Calcular estadísticas de demostración
             stats = {}
             if filtered_communities:
-                total_interactions = sum(c['total_interactions'] for c in filtered_communities)
-                total_properties = sum(c['total_properties'] for c in filtered_communities)
+                total_interactions = sum(c['total_interactions']
+                                         for c in filtered_communities)
+                total_properties = sum(c['total_properties']
+                                       for c in filtered_communities)
                 stats = {
                     "avg_interactions": total_interactions / len(filtered_communities),
                     "avg_properties": total_properties / len(filtered_communities),
                     "max_interactions": max(c['total_interactions'] for c in filtered_communities),
                     "min_interactions": min(c['total_interactions'] for c in filtered_communities)
                 }
-            
+
             return {
                 "success": True,
                 "communities": filtered_communities,

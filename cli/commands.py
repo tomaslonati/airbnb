@@ -1166,62 +1166,14 @@ async def create_property_interactive(property_service, anfitrion_id):
             imagen_urls = [url.strip()
                            for url in imagenes_input.split(",") if url.strip()]
 
-        # Configuración del calendario
-        typer.echo("\n📅 ¿CUÁNTOS DÍAS DE DISPONIBILIDAD GENERAR?")
-        typer.echo("\n⚡ OPCIÓN RÁPIDA (Recomendada para empezar):")
-        typer.echo("  1. Solo 7 días   - 🚀 Creación instantánea (2-3 segundos)")
-        typer.echo("  2. Un mes (30)  - ⏱️  Rápido (5-8 segundos)")
-        typer.echo("\n🔋 OPCIONES AVANZADAS:")
-        typer.echo("  3. Tres meses (90) - 🕰️  Moderado (15-20 segundos)")
-        typer.echo("  4. Año completo (365) - 🐢 Lento (45-60 segundos)")
-        typer.echo("  5. Personalizado")
-        
-        opcion = typer.prompt("📅 Elige una opción (1-5)", default="1", type=str)
-        
-        # Mapear opción a días
-        dias_map = {
-            "1": 7,
-            "2": 30, 
-            "3": 90,
-            "4": 365
-        }
-        
-        if opcion in dias_map:
-            dias_calendario = dias_map[opcion]
-        elif opcion == "5":
-            dias_calendario = typer.prompt("📅 ¿Cuántos días? (máximo 500)", default=30, type=int)
-            if dias_calendario > 500:
-                typer.echo("⚠️  Limitado a 500 días por rendimiento")
-                dias_calendario = 500
-        else:
-            typer.echo("⚠️  Opción inválida, usando 7 días por defecto")
-            dias_calendario = 7
-            
-        # Mostrar estimación de tiempo
-        tiempo_estimado = {
-            7: "2-3 segundos",
-            30: "5-8 segundos", 
-            90: "15-20 segundos",
-            365: "45-60 segundos"
-        }
-        tiempo = tiempo_estimado.get(dias_calendario, "Variable según la cantidad")
-        
-        typer.echo(f"\n🕰️  Tiempo estimado: {tiempo}")
-        confirmar = typer.prompt(f"🚀 ¿Crear propiedad con {dias_calendario} días? (s/n)", default="s")
-        
-        if confirmar.lower() not in ['s', 'si', 'yes', 'y']:
-            typer.echo("❌ Operación cancelada")
-            return
-
         typer.echo(f"\n🚀 Iniciando creación de propiedad...")
-        typer.echo(f"🔄 Generando {dias_calendario} días de disponibilidad...")
         typer.echo("⏳ Esto puede tomar unos momentos, por favor espera...\n")
 
         # Importar utilidades de progreso
         import asyncio
         from utils.progress import with_progress
 
-        # Ejecutar creación con indicador de progreso
+        # Ejecutar creación SIN calendario automático
         result = await with_progress(
             property_service.create_property(
                 nombre=nombre,
@@ -1236,10 +1188,10 @@ async def create_property_interactive(property_service, anfitrion_id):
                 amenities=amenity_ids,
                 servicios=servicio_ids,
                 reglas=regla_ids,
-                generar_calendario=True,
-                dias_calendario=dias_calendario
+                generar_calendario=False,  # No generar calendario automático
+                dias_calendario=0  # Sin días
             ),
-            message=f"Creando propiedad con {dias_calendario} días"
+            message="Creando propiedad"
         )
 
         if result.get("success"):
@@ -1256,7 +1208,8 @@ async def create_property_interactive(property_service, anfitrion_id):
                     if data['total_calls'] > 0:
                         typer.echo(f"  • {operation}: {data['avg_time']:.2f}s")
                         
-            typer.echo(f"\n🚀 ¡Tu propiedad '{nombre}' está lista con {dias_calendario} días de disponibilidad!")
+            typer.echo(f"\n🚀 ¡Tu propiedad '{nombre}' está lista!")
+            typer.echo("💡 Puedes agregar fechas disponibles desde 'Gestionar disponibilidad de propiedades'")
         else:
             typer.echo(f"\n❌ Error: {result.get('error')}")
 

@@ -4,6 +4,7 @@ Conexión a AstraDB usando DataAPIClient.
 
 from astrapy import DataAPIClient
 from typing import Optional, Any
+from datetime import date
 from config import db_config
 from utils.logging import get_logger
 from utils.retry import retry_on_connection_error
@@ -101,7 +102,7 @@ async def insert_many_documents(collection_name: str, documents: list):
     try:
         if not documents:
             return []
-            
+
         collection = await get_collection(collection_name)
         result = collection.insert_many(documents)
         logger.info(
@@ -179,7 +180,7 @@ async def cassandra_mark_unavailable(propiedad_id: int, fechas: list, ciudad_id:
         # Si no se proporciona ciudad_id, obtenerlo de PostgreSQL
         if ciudad_id is None:
             ciudad_id = await get_ciudad_id_for_propiedad(propiedad_id)
-        
+
         if not ciudad_id:
             logger.warning(
                 f"No se encontró ciudad_id para propiedad {propiedad_id}")
@@ -207,7 +208,7 @@ async def cassandra_mark_available(propiedad_id: int, fechas: list, ciudad_id: i
         # Si no se proporciona ciudad_id, obtenerlo de PostgreSQL
         if ciudad_id is None:
             ciudad_id = await get_ciudad_id_for_propiedad(propiedad_id)
-        
+
         if not ciudad_id:
             logger.warning(
                 f"No se encontró ciudad_id para propiedad {propiedad_id}")
@@ -234,55 +235,53 @@ async def cassandra_init_date(propiedad_id: int, fechas: list, ciudad_id: int = 
         # Si no se proporciona ciudad_id, obtenerlo de PostgreSQL
         if ciudad_id is None:
             ciudad_id = await get_ciudad_id_for_propiedad(propiedad_id)
-        
+
         if not ciudad_id:
             logger.warning(
                 f"No se encontró ciudad_id para propiedad {propiedad_id}")
             return
 
         import asyncio
-        
+
         # Preparar tareas para ejecutar en paralelo
         tasks = []
-        
-        # 1. Preparar documentos para batch insert en ocupación por ciudad
-        ocupacion_ciudad_docs = []
-        ocupacion_propiedad_docs = []
-        disponibilidad_docs = []
-        
+
+        # Actualizar ocupación por ciudad usando UPDATE atómico
         for fecha in fechas:
             fecha_str = fecha.isoformat() if hasattr(fecha, 'isoformat') else str(fecha)
-            
-            # Documento para ocupación por ciudad
-            ocupacion_ciudad_docs.append({
-                "ciudad_id": ciudad_id,  # bigint según esquema de AstraDB
-                "fecha": fecha_str,
-                "noches_disponibles": 1,
-                "noches_ocupadas": 0
-            })
-            
-            # Documento para ocupación por propiedad  
+            # UPDATE atómico: incrementar noches_disponibles para esta ciudad/fecha
+            await _update_ocupacion_ciudad(ciudad_id, fecha_str, occupied_delta=0, available_delta=1)
+
+        # 2. Preparar documentos para ocupación por propiedad y disponibilidad
+        ocupacion_propiedad_docs = []
+        disponibilidad_docs = []
+
+        # Preparar documentos restantes para batch insert
+        for fecha in fechas:
+            fecha_str = fecha.isoformat() if hasattr(fecha, 'isoformat') else str(fecha)
+
+            # Documento para ocupación por propiedad
             ocupacion_propiedad_docs.append({
                 "propiedad_id": propiedad_id,  # bigint según esquema de AstraDB
                 "fecha": fecha_str,
                 "ocupada": False
             })
-            
+
             # Documento para disponibilidad - usar colección correcta
             disponibilidad_docs.append({
                 "fecha": fecha_str,
                 "propiedades_disponibles": [propiedad_id],
                 "ciudad_ids": [ciudad_id]
             })
-        
-        # Ejecutar todas las operaciones batch en paralelo
-        if ocupacion_ciudad_docs:
-            tasks.append(insert_many_documents("ocupacion_por_ciudad", ocupacion_ciudad_docs))
+
+        # Ejecutar operaciones batch en paralelo (solo las que no son ocupacion_por_ciudad)
         if ocupacion_propiedad_docs:
-            tasks.append(insert_many_documents("ocupacion_por_propiedad", ocupacion_propiedad_docs))
+            tasks.append(insert_many_documents(
+                "ocupacion_por_propiedad", ocupacion_propiedad_docs))
         if disponibilidad_docs:
-            tasks.append(insert_many_documents("propiedades_disponibles_por_fecha", disponibilidad_docs))
-            
+            tasks.append(insert_many_documents(
+                "propiedades_disponibles_por_fecha", disponibilidad_docs))
+
         # Ejecutar todas las tareas en paralelo
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -306,7 +305,8 @@ async def cassandra_add_reserva(reserva_data: dict):
         fecha_fin = reserva_data.get('fecha_fin')
         propiedad_id = reserva_data.get('propiedad_id')
 
-        logger.info(f"[CU6] cassandra_add_reserva llamado con: reserva_id={reserva_id}, host_id={host_id}, fecha_inicio={fecha_inicio}")
+        logger.info(
+            f"[CU6] cassandra_add_reserva llamado con: reserva_id={reserva_id}, host_id={host_id}, fecha_inicio={fecha_inicio}")
 
         # Agregar a reservas por host
         await _add_reserva_por_host(host_id, fecha_inicio, reserva_id, reserva_data)
@@ -377,16 +377,16 @@ async def _remove_propiedad_disponible(fecha, propiedad_id: int):
         collection = await get_collection("propiedades_disponibles_por_fecha")
 
         fecha_str = fecha.isoformat() if hasattr(fecha, 'isoformat') else str(fecha)
-        
+
         # Buscar todos los documentos para esta fecha que contengan la propiedad
         docs = await find_documents("propiedades_disponibles_por_fecha", {"fecha": fecha_str}, limit=50)
-        
+
         for doc in docs:
             propiedades = doc.get("propiedades_disponibles", [])
             if propiedad_id in propiedades:
                 # Remover la propiedad del array
                 propiedades.remove(propiedad_id)
-                
+
                 if propiedades:  # Si aún quedan propiedades
                     # Actualizar el documento con el array modificado
                     collection.update_one(
@@ -395,8 +395,9 @@ async def _remove_propiedad_disponible(fecha, propiedad_id: int):
                     )
                 else:  # Si no quedan propiedades, eliminar el documento completo
                     collection.delete_one({"_id": doc["_id"]})
-                
-                logger.debug(f"Propiedad {propiedad_id} removida de documento para fecha {fecha_str}")
+
+                logger.debug(
+                    f"Propiedad {propiedad_id} removida de documento para fecha {fecha_str}")
 
     except Exception as e:
         logger.error(f"Error removiendo propiedad disponible: {e}")
@@ -419,9 +420,11 @@ async def _add_reserva_por_host(host_id: int, fecha, reserva_id: int, reserva_da
             "total_price": float(reserva_data.get('precio_total', 0))
         }
 
-        logger.info(f"[CU6] Insertando reserva en reservas_por_host_fecha: {new_doc}")
+        logger.info(
+            f"[CU6] Insertando reserva en reservas_por_host_fecha: {new_doc}")
         collection.insert_one(new_doc)
-        logger.info(f"[CU6] ✓ Reserva {reserva_id} insertada exitosamente para host {host_id} en fecha {fecha_str}")
+        logger.info(
+            f"[CU6] ✓ Reserva {reserva_id} insertada exitosamente para host {host_id} en fecha {fecha_str}")
 
     except Exception as e:
         logger.error(f"[CU6] ✗ Error agregando reserva por host: {e}")
@@ -526,27 +529,28 @@ async def get_propiedades_disponibles_por_fecha(fecha, ciudad_id: int = None, li
         filter_doc = {"fecha": fecha_str}
 
         documents = await find_documents("propiedades_disponibles_por_fecha", filter_doc, limit=limit)
-        logger.info(f"Encontrados {len(documents)} documentos de disponibilidad para {fecha_str}")
+        logger.info(
+            f"Encontrados {len(documents)} documentos de disponibilidad para {fecha_str}")
 
         propiedades_resultado = []
         propiedades_ids_procesados = set()
-        
+
         for doc in documents:
             props_disponibles = doc.get('propiedades_disponibles', [])
             ciudades_doc = doc.get('ciudad_ids', [])
-            
+
             # Filtrar por ciudad si se especifica
             if ciudad_id and ciudad_id not in ciudades_doc:
                 continue
-            
+
             # Procesar cada propiedad disponible
             for prop_id in props_disponibles:
                 if prop_id not in propiedades_ids_procesados:
                     propiedades_ids_procesados.add(prop_id)
-                    
+
                     # Determinar ciudad (usar la primera del documento)
                     ciudad_prop_id = ciudades_doc[0] if ciudades_doc else 1
-                    
+
                     # Crear información básica usando solo datos disponibles
                     prop_info = {
                         'propiedad_id': prop_id,
@@ -560,7 +564,8 @@ async def get_propiedades_disponibles_por_fecha(fecha, ciudad_id: int = None, li
                     }
                     propiedades_resultado.append(prop_info)
 
-        logger.info(f"[CU4 SOLO CASSANDRA] Encontradas {len(propiedades_resultado)} propiedades disponibles para {fecha_str}")
+        logger.info(
+            f"[CU4 SOLO CASSANDRA] Encontradas {len(propiedades_resultado)} propiedades disponibles para {fecha_str}")
         return propiedades_resultado
 
     except Exception as e:
@@ -572,7 +577,7 @@ def _get_ciudad_nombre(ciudad_id: int) -> str:
     """Mapeo de IDs de ciudad a nombres (sin consulta SQL)."""
     ciudades_map = {
         1: "Buenos Aires",
-        2: "Madrid", 
+        2: "Madrid",
         3: "Barcelona",
         4: "Lima",
         5: "Ciudad de México",
@@ -642,11 +647,11 @@ async def get_propiedades_ciudad_capacidad_wifi(ciudad_id: int, min_capacidad: i
     try:
         # Consulta simple a la colección optimizada - SOLO CASSANDRA
         collection = await get_collection("properties_by_city_wifi_capacity")
-        
+
         # Mapear ID a nombre de ciudad
         ciudad_nombres = {
             1: "Buenos Aires",
-            2: "Madrid", 
+            2: "Madrid",
             3: "Barcelona",
             4: "Lima",
             5: "Ciudad de México",
@@ -654,20 +659,20 @@ async def get_propiedades_ciudad_capacidad_wifi(ciudad_id: int, min_capacidad: i
             7: "Mar del Plata"
         }
         ciudad_nombre = ciudad_nombres.get(ciudad_id, f"Ciudad_{ciudad_id}")
-        
+
         # Filtrar por ciudad en Cassandra
         filter_doc = {
             "ciudad_nombre": ciudad_nombre
         }
-        
+
         documents = await find_documents("properties_by_city_wifi_capacity", filter_doc, limit=limit)
-        
+
         # Filtrar en memoria por capacidad y WiFi
         propiedades_filtradas = []
         for doc in documents:
             capacidad = doc.get('capacidad')
             wifi = doc.get('tiene_wifi', False)
-            
+
             # Validar capacidad (≥ min_capacidad)
             if capacidad is not None and int(capacidad) >= min_capacidad:
                 # Validar WiFi si es requerido
@@ -683,13 +688,15 @@ async def get_propiedades_ciudad_capacidad_wifi(ciudad_id: int, min_capacidad: i
                         'ciudad_id': ciudad_id
                     }
                     propiedades_filtradas.append(prop_doc)
-        
-        logger.info(f"[CASSANDRA ONLY] Encontradas {len(propiedades_filtradas)} propiedades en {ciudad_nombre} con capacidad ≥{min_capacidad} y WiFi={wifi_required}")
-        
+
+        logger.info(
+            f"[CASSANDRA ONLY] Encontradas {len(propiedades_filtradas)} propiedades en {ciudad_nombre} con capacidad ≥{min_capacidad} y WiFi={wifi_required}")
+
         return propiedades_filtradas
 
     except Exception as e:
-        logger.error(f"Error obteniendo propiedades por ciudad con filtros: {e}")
+        logger.error(
+            f"Error obteniendo propiedades por ciudad con filtros: {e}")
         return []
 
 
@@ -707,15 +714,16 @@ async def cassandra_sync_propiedad_cu3(propiedad_id: int, ciudad_id: int, nombre
             # Obtener nombre de la ciudad
             ciudad_nombres = {
                 1: "Buenos Aires",
-                2: "Madrid", 
+                2: "Madrid",
                 3: "Barcelona",
                 4: "Lima",
                 5: "Ciudad de México",
                 6: "Bariloche",
                 7: "Mar del Plata"
             }
-            ciudad_nombre = ciudad_nombres.get(ciudad_id, f"Ciudad_{ciudad_id}")
-            
+            ciudad_nombre = ciudad_nombres.get(
+                ciudad_id, f"Ciudad_{ciudad_id}")
+
             # Crear documento para la colección CU3
             propiedad_cu3 = {
                 "ciudad_nombre": ciudad_nombre,
@@ -724,16 +732,19 @@ async def cassandra_sync_propiedad_cu3(propiedad_id: int, ciudad_id: int, nombre
                 "propiedad_id": propiedad_id,
                 "nombre_propiedad": nombre
             }
-            
+
             # Insertar en la colección optimizada para CU3
             await insert_document("properties_by_city_wifi_capacity", propiedad_cu3)
-            
-            logger.info(f"✅ Propiedad {propiedad_id} agregada a CU3 Cassandra: {nombre} (cap:{capacidad}, wifi:true)")
+
+            logger.info(
+                f"✅ Propiedad {propiedad_id} agregada a CU3 Cassandra: {nombre} (cap:{capacidad}, wifi:true)")
         else:
-            logger.info(f"ℹ️  Propiedad {propiedad_id} NO cumple criterios CU3: {nombre} (cap:{capacidad}, wifi:{1 in servicios_ids})")
-            
+            logger.info(
+                f"ℹ️  Propiedad {propiedad_id} NO cumple criterios CU3: {nombre} (cap:{capacidad}, wifi:{1 in servicios_ids})")
+
     except Exception as e:
-        logger.error(f"Error sincronizando propiedad {propiedad_id} con CU3 Cassandra: {e}")
+        logger.error(
+            f"Error sincronizando propiedad {propiedad_id} con CU3 Cassandra: {e}")
 
 
 async def cassandra_remove_propiedad_cu3(propiedad_id: int):
@@ -742,19 +753,23 @@ async def cassandra_remove_propiedad_cu3(propiedad_id: int):
     """
     try:
         collection = await get_collection("properties_by_city_wifi_capacity")
-        
+
         # Buscar y eliminar el documento de la propiedad
         filter_doc = {"propiedad_id": propiedad_id}
         result = collection.delete_one(filter_doc)
-        
+
         if result.deleted_count > 0:
-            logger.info(f"✅ Propiedad {propiedad_id} removida de CU3 Cassandra")
+            logger.info(
+                f"✅ Propiedad {propiedad_id} removida de CU3 Cassandra")
         else:
-            logger.info(f"ℹ️  Propiedad {propiedad_id} no estaba en CU3 Cassandra")
-            
+            logger.info(
+                f"ℹ️  Propiedad {propiedad_id} no estaba en CU3 Cassandra")
+
     except Exception as e:
-        logger.error(f"Error removiendo propiedad {propiedad_id} de CU3 Cassandra: {e}")
-        logger.error(f"Error obteniendo propiedades por ciudad con filtros: {e}")
+        logger.error(
+            f"Error removiendo propiedad {propiedad_id} de CU3 Cassandra: {e}")
+        logger.error(
+            f"Error obteniendo propiedades por ciudad con filtros: {e}")
         return []
 
 
@@ -807,43 +822,44 @@ async def get_ciudad_id_for_propiedad(propiedad_id: int):
 
 
 async def _update_ocupacion_ciudad(ciudad_id: int, fecha, occupied_delta: int, available_delta: int):
-    """Actualiza métricas de ocupación por ciudad."""
+    """Actualiza métricas de ocupación por ciudad usando patrón read-compute-write."""
     try:
         collection = await get_collection("ocupacion_por_ciudad")
 
-        fecha_str = fecha.isoformat() if hasattr(fecha, 'isoformat') else str(fecha)
-        filter_doc = {"ciudad_id": ciudad_id, "fecha": fecha_str}  # usar bigint como en esquema
+        fecha_str = fecha.isoformat() if hasattr(fecha, 'isoformat') else str(
+            fecha) if isinstance(fecha, date) else str(fecha)
+        filter_doc = {"ciudad_id": ciudad_id, "fecha": fecha_str}
 
-        # Buscar documento existente
-        existing = await find_documents("ocupacion_por_ciudad", filter_doc, limit=1)
+        # PASO 1: Leer documento actual
+        existing_doc = collection.find_one(filter_doc)
 
-        if existing:
-            doc = existing[0]
-            noches_ocupadas = max(0, doc.get(
-                'noches_ocupadas', 0) + occupied_delta)
-            noches_disponibles = max(0, doc.get(
-                'noches_disponibles', 0) + available_delta)
-
-            # Solo actualizar campos no-clave primaria
-            update_fields = {
-                "noches_ocupadas": noches_ocupadas,
-                "noches_disponibles": noches_disponibles
-            }
-
-            collection.update_one(
-                filter_doc,
-                {"$set": update_fields}
-            )
+        if existing_doc:
+            # PASO 2: Calcular nuevos valores
+            new_noches_ocupadas = existing_doc.get(
+                "noches_ocupadas", 0) + occupied_delta
+            new_noches_disponibles = existing_doc.get(
+                "noches_disponibles", 0) + available_delta
         else:
-            # Insertar nuevo documento
-            new_doc = {
-                "ciudad_id": ciudad_id,  # bigint según esquema
-                "fecha": fecha_str,
-                "noches_ocupadas": max(0, occupied_delta),
-                "noches_disponibles": max(0, available_delta)
-            }
+            # Si no existe, usar los deltas como valores iniciales
+            new_noches_ocupadas = max(0, occupied_delta)
+            new_noches_disponibles = max(0, available_delta)
 
-            collection.insert_one(new_doc)
+        # PASO 3: Actualizar usando updateOne con $set (compatible con Tables)
+        # IMPORTANTE: NO incluir PRIMARY KEY (ciudad_id, fecha) en $set
+        update_doc = {
+            "noches_ocupadas": max(0, new_noches_ocupadas),  # Nunca negativos
+            "noches_disponibles": max(0, new_noches_disponibles)
+        }
+
+        # Usar updateOne con $set para Tables (NO incluir PK en el update)
+        collection.update_one(
+            filter_doc,
+            {"$set": update_doc},
+            upsert=True
+        )
+
+        logger.debug(f"Read-compute-write ocupación: ciudad {ciudad_id}, fecha {fecha_str}, "
+                     f"ocupadas={new_noches_ocupadas}, disponibles={new_noches_disponibles}")
 
     except Exception as e:
         logger.error(f"Error actualizando ocupación ciudad: {e}")
@@ -855,7 +871,8 @@ async def _update_ocupacion_propiedad(propiedad_id: int, fecha, ocupada: bool):
         collection = await get_collection("ocupacion_por_propiedad")
 
         fecha_str = fecha.isoformat() if hasattr(fecha, 'isoformat') else str(fecha)
-        filter_doc = {"propiedad_id": propiedad_id, "fecha": fecha_str}  # usar bigint como en esquema
+        filter_doc = {"propiedad_id": propiedad_id,
+                      "fecha": fecha_str}  # usar bigint como en esquema
 
         # Buscar si el documento existe
         existing = await find_documents("ocupacion_por_propiedad", filter_doc, limit=1)
@@ -877,3 +894,58 @@ async def _update_ocupacion_propiedad(propiedad_id: int, fecha, ocupada: bool):
 
     except Exception as e:
         logger.error(f"Error actualizando ocupación propiedad: {e}")
+
+
+async def confirmar_reserva_ocupacion(ciudad_id: int, fechas: list):
+    """
+    Actualiza ocupacion_por_ciudad cuando se CONFIRMA una reserva.
+    Mueve 1 noche de disponible → ocupada para cada fecha.
+    """
+    try:
+        for fecha in fechas:
+            await _update_ocupacion_ciudad(
+                ciudad_id=ciudad_id,
+                fecha=fecha,
+                occupied_delta=1,      # +1 ocupada
+                available_delta=-1     # -1 disponible
+            )
+        logger.info(
+            f"✅ Reserva confirmada: ciudad {ciudad_id}, {len(fechas)} fechas")
+
+    except Exception as e:
+        logger.error(f"Error confirmando reserva ocupación: {e}")
+        raise
+
+
+async def cancelar_reserva_ocupacion(ciudad_id: int, fechas: list):
+    """
+    Actualiza ocupacion_por_ciudad cuando se CANCELA una reserva.
+    Mueve 1 noche de ocupada → disponible para cada fecha.
+    """
+    try:
+        for fecha in fechas:
+            await _update_ocupacion_ciudad(
+                ciudad_id=ciudad_id,
+                fecha=fecha,
+                occupied_delta=-1,     # -1 ocupada
+                available_delta=1      # +1 disponible
+            )
+        logger.info(
+            f"✅ Reserva cancelada: ciudad {ciudad_id}, {len(fechas)} fechas")
+
+    except Exception as e:
+        logger.error(f"Error cancelando reserva ocupación: {e}")
+        raise
+
+
+async def delete_collection_data(collection_name: str):
+    """Elimina todos los documentos de una colección."""
+    try:
+        collection = await get_collection(collection_name)
+        result = collection.delete_many({})
+        logger.info(
+            f"✅ Eliminados {result.deleted_count} documentos de {collection_name}")
+        return result.deleted_count
+    except Exception as e:
+        logger.error(f"Error eliminando datos de {collection_name}: {e}")
+        raise

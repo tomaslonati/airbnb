@@ -3,6 +3,8 @@
 Script para verificar todas las tablas disponibles en PostgreSQL.
 """
 
+from utils.logging import configure_logging, get_logger
+from db.postgres import execute_query
 import asyncio
 import sys
 from pathlib import Path
@@ -10,8 +12,6 @@ from pathlib import Path
 # Agregar el directorio raíz al path
 sys.path.append(str(Path(__file__).parent))
 
-from db.postgres import execute_query
-from utils.logging import configure_logging, get_logger
 
 # Configurar logging
 configure_logging()
@@ -32,9 +32,9 @@ async def verificar_tablas_postgresql():
             WHERE table_schema = 'public'
             ORDER BY table_name;
         """
-        
+
         tables = await execute_query(query_tables)
-        
+
         if tables:
             for table in tables:
                 print(f"  - {table['table_name']}")
@@ -49,9 +49,9 @@ async def verificar_tablas_postgresql():
             JOIN ciudad c ON p.ciudad_id = c.id
             LIMIT 3;
         """
-        
+
         examples = await execute_query(query_example)
-        
+
         if examples:
             for i, ex in enumerate(examples, 1):
                 print(f"\n  🏠 Propiedad {i}:")

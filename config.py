@@ -33,7 +33,8 @@ class DatabaseConfig(BaseSettings):
     neo4j_database: str = os.getenv("NEO4J_DATABASE", "neo4j")
     # Fallback IPs para problemas DNS
     neo4j_fallback_ip: str = os.getenv("NEO4J_FALLBACK_IP", "34.205.14.132")
-    neo4j_enable_fallback: bool = os.getenv("NEO4J_ENABLE_FALLBACK", "true").lower() == "true"
+    neo4j_enable_fallback: bool = os.getenv(
+        "NEO4J_ENABLE_FALLBACK", "true").lower() == "true"
 
     # MongoDB Atlas
     mongo_connection_string: str = os.getenv("MONGO_CONNECTION_STRING", "")

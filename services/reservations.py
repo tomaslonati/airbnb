@@ -55,7 +55,8 @@ class ReservationService:
         """Lazy loading del repositorio Cassandra (deshabilitado para usar solo AstraDB)"""
         # Deshabilitar repositorio CQL que intenta conectar a localhost
         # Solo usar AstraDB DataAPI que ya funciona correctamente
-        logger.warning("Repositorio Cassandra CQL deshabilitado - usando solo AstraDB DataAPI")
+        logger.warning(
+            "Repositorio Cassandra CQL deshabilitado - usando solo AstraDB DataAPI")
         return None
 
     def close(self):
@@ -83,15 +84,19 @@ class ReservationService:
             if not neo4j.quick_check():
                 logger.warning("Neo4j no disponible, usando simulador")
                 # Usar simulador inmediatamente
-                result = neo4j_simulator.simulate_recurrent_booking_analysis(int(user_id), 0)
+                result = neo4j_simulator.simulate_recurrent_booking_analysis(
+                    int(user_id), 0)
                 if result["success"]:
-                    logger.info(f"✅ Neo4j SIMULADO: Análisis de reservas recurrentes para usuario {user_id}")
-                    logger.info(f"CU 9 SIMULADO: Relación recurrente para usuario {user_id} en {city_name}")
+                    logger.info(
+                        f"✅ Neo4j SIMULADO: Análisis de reservas recurrentes para usuario {user_id}")
+                    logger.info(
+                        f"CU 9 SIMULADO: Relación recurrente para usuario {user_id} en {city_name}")
                 else:
-                    logger.error(f"Error en simulador Neo4j: {result.get('error')}")
+                    logger.error(
+                        f"Error en simulador Neo4j: {result.get('error')}")
                 return
                 return
-                
+
             # Asegurar que el cliente Neo4j esté inicializado
             await neo4j.get_client()
 
@@ -113,19 +118,22 @@ class ReservationService:
 
             logger.info(
                 f"Relación de reserva recurrente actualizada en Neo4j para usuario {user_id} en {city_name}")
-                
+
         except Exception as e:
             # En caso de error, usar simulador como fallback
             logger.error(
                 f"Fallo en la escritura a Neo4j (reservas recurrentes): {e}")
-            
+
             # Fallback al simulador
             try:
-                result = neo4j_simulator.simulate_recurrent_booking_analysis(int(user_id), 0)
+                result = neo4j_simulator.simulate_recurrent_booking_analysis(
+                    int(user_id), 0)
                 if result["success"]:
-                    logger.info(f"CU 9: Actualizada relación Neo4j para usuario {user_id} en {city_name}")
+                    logger.info(
+                        f"CU 9: Actualizada relación Neo4j para usuario {user_id} en {city_name}")
                 else:
-                    logger.warning(f"Error en fallback del simulador: {result.get('error')}")
+                    logger.warning(
+                        f"Error en fallback del simulador: {result.get('error')}")
             except Exception as sim_error:
                 logger.error(f"Error crítico en simulador: {sim_error}")
 
@@ -608,7 +616,8 @@ class ReservationService:
             try:
                 from services.search import invalidate_search_cache_for_city
                 await invalidate_search_cache_for_city(propiedad['ciudad_id'])
-                logger.info(f"[CU8] Cache invalidado para ciudad_id {propiedad['ciudad_id']} después de nueva reserva")
+                logger.info(
+                    f"[CU8] Cache invalidado para ciudad_id {propiedad['ciudad_id']} después de nueva reserva")
             except Exception as cache_error:
                 logger.warning(f"[CU8] Error invalidando cache: {cache_error}")
                 # No fallar la reserva por error de cache
@@ -635,8 +644,9 @@ class ReservationService:
             except Exception as e:
                 # En un sistema real, esto es un warning. La reserva debe continuar.
                 # Crear/actualizar relación host-guest en Neo4j para análisis de comunidades
-                logger.error(f"Fallo en la escritura a Neo4j (CU 9 - usuarios recurrentes): {e}")
-            
+                logger.error(
+                    f"Fallo en la escritura a Neo4j (CU 9 - usuarios recurrentes): {e}")
+
             try:
                 # Quick check antes de intentar Neo4j
                 if neo4j.quick_check() and self.neo4j_service:
@@ -669,9 +679,11 @@ class ReservationService:
                         interaction_type="booking"
                     )
                     if sim_result["success"]:
-                        logger.info(f"Neo4j SIMULADO: Interacción host-guest creada exitosamente")
+                        logger.info(
+                            f"Neo4j SIMULADO: Interacción host-guest creada exitosamente")
                     else:
-                        logger.warning(f"Error en simulador Neo4j: {sim_result.get('error')}")
+                        logger.warning(
+                            f"Error en simulador Neo4j: {sim_result.get('error')}")
 
             except Exception as e:
                 logger.warning(f"Error en relación Neo4j: {e}")
@@ -683,7 +695,8 @@ class ReservationService:
                         interaction_type="booking"
                     )
                     if sim_result["success"]:
-                        logger.info("FALLBACK: Interacción Neo4j simulada correctamente")
+                        logger.info(
+                            "FALLBACK: Interacción Neo4j simulada correctamente")
                 except Exception as sim_error:
                     logger.error(f"Error crítico en simulador: {sim_error}")
                     # La reserva continúa aunque falle Neo4j
@@ -977,7 +990,8 @@ class ReservationService:
             try:
                 from services.search import invalidate_search_cache_for_city
                 await invalidate_search_cache_for_city(reserva['ciudad_id'])
-                logger.info(f"[CU8] Cache invalidado para ciudad_id {reserva['ciudad_id']} después de cancelación")
+                logger.info(
+                    f"[CU8] Cache invalidado para ciudad_id {reserva['ciudad_id']} después de cancelación")
             except Exception as cache_error:
                 logger.warning(f"[CU8] Error invalidando cache: {cache_error}")
                 # No fallar la cancelación por error de cache
@@ -1055,7 +1069,7 @@ class ReservationService:
             }
 
     async def _sync_nueva_reserva_cassandra(self, reserva_id: int, propiedad_id: int,
-                                          host_id: int, huesped_id: int, fecha_inicio: date,
+                                            host_id: int, huesped_id: int, fecha_inicio: date,
                                             fecha_fin: date, precio_total: float, estado: str):
         """
         Sincroniza una nueva reserva con las nuevas tablas de Cassandra.
@@ -1203,7 +1217,7 @@ class ReservationService:
     async def get_propiedades_ciudad_capacidad_wifi(self, ciudad_id: int, min_capacidad: int = 3, wifi_required: bool = True):
         """
         CU 3: Busca propiedades en una ciudad específica con capacidad ≥3 y WiFi usando Cassandra.
-        
+
         Args:
             ciudad_id: ID de la ciudad
             min_capacidad: Capacidad mínima de huéspedes (default: 3)
@@ -1213,8 +1227,8 @@ class ReservationService:
             from db.cassandra import get_propiedades_ciudad_capacidad_wifi
 
             propiedades = await get_propiedades_ciudad_capacidad_wifi(
-                ciudad_id=ciudad_id, 
-                min_capacidad=min_capacidad, 
+                ciudad_id=ciudad_id,
+                min_capacidad=min_capacidad,
                 wifi_required=wifi_required
             )
 
@@ -1228,7 +1242,8 @@ class ReservationService:
             }
 
         except Exception as e:
-            logger.error(f"Error obteniendo propiedades por ciudad con filtros: {e}")
+            logger.error(
+                f"Error obteniendo propiedades por ciudad con filtros: {e}")
             return {
                 "success": False,
                 "error": f"Error obteniendo propiedades: {str(e)}"

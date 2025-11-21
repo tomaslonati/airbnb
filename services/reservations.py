@@ -496,7 +496,7 @@ class ReservationService:
 
             # Verificar que la propiedad existe
             prop_result = await execute_query(
-                "SELECT id, nombre, capacidad, anfitrion_id FROM propiedad WHERE id = $1",
+                "SELECT id, nombre, capacidad, anfitrion_id, ciudad_id FROM propiedad WHERE id = $1",
                 propiedad_id
             )
 
@@ -603,6 +603,15 @@ class ReservationService:
                 precio_total=float(total_price),
                 estado="confirmada"
             )
+
+            # CU 8: Invalidar cache de búsquedas para la ciudad
+            try:
+                from services.search import invalidate_search_cache_for_city
+                await invalidate_search_cache_for_city(propiedad['ciudad_id'])
+                logger.info(f"[CU8] Cache invalidado para ciudad_id {propiedad['ciudad_id']} después de nueva reserva")
+            except Exception as cache_error:
+                logger.warning(f"[CU8] Error invalidando cache: {cache_error}")
+                # No fallar la reserva por error de cache
 
             # CU 9: Lógica de doble escritura a Neo4j para usuarios recurrentes
             try:
@@ -894,9 +903,10 @@ class ReservationService:
         try:
             # Verificar que la reserva existe y pertenece al huésped
             verify_query = """
-                SELECT r.id, r.propiedad_id, r.fecha_check_in, r.fecha_check_out, er.nombre as estado
+                SELECT r.id, r.propiedad_id, r.fecha_check_in, r.fecha_check_out, er.nombre as estado, p.ciudad_id
                 FROM reserva r
                 JOIN estado_reserva er ON r.estado_reserva_id = er.id
+                JOIN propiedad p ON r.propiedad_id = p.id
                 WHERE r.id = $1 AND r.huesped_id = $2
             """
 
@@ -962,6 +972,15 @@ class ReservationService:
                 check_in=reserva['fecha_check_in'],
                 check_out=reserva['fecha_check_out']
             )
+
+            # CU 8: Invalidar cache de búsquedas para la ciudad
+            try:
+                from services.search import invalidate_search_cache_for_city
+                await invalidate_search_cache_for_city(reserva['ciudad_id'])
+                logger.info(f"[CU8] Cache invalidado para ciudad_id {reserva['ciudad_id']} después de cancelación")
+            except Exception as cache_error:
+                logger.warning(f"[CU8] Error invalidando cache: {cache_error}")
+                # No fallar la cancelación por error de cache
 
             return {
                 "success": True,

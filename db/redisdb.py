@@ -85,3 +85,37 @@ async def get_hash(key: str, field: str = None):
     else:
         hash_data = await client.hgetall(key)
         return hash_data  # decode_responses=True ya devuelve dict[str, str]
+
+
+# Cache key tracking helpers for invalidation
+async def add_to_set(set_key: str, value: str):
+    """Agrega un valor a un set de Redis."""
+    client = await get_client()
+    return await client.sadd(set_key, value)
+
+
+async def get_set_members(set_key: str):
+    """Obtiene todos los miembros de un set."""
+    client = await get_client()
+    return await client.smembers(set_key)
+
+
+async def delete_set(set_key: str):
+    """Elimina un set completo."""
+    client = await get_client()
+    return await client.delete(set_key)
+
+
+async def delete_keys_in_set(set_key: str):
+    """Elimina todas las claves referenciadas en un set y el set mismo."""
+    client = await get_client()
+    members = await get_set_members(set_key)
+
+    if members:
+        # Eliminar todas las claves referenciadas
+        await client.delete(*members)
+        logger.info(f"Eliminadas {len(members)} claves del set {set_key}")
+
+    # Eliminar el set mismo
+    await delete_set(set_key)
+    return len(members) if members else 0

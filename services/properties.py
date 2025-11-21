@@ -476,6 +476,15 @@ class PropertyService:
             except Exception as cu3_error:
                 logger.warning(f"⚠️  Error en sync CU3 Cassandra (no crítico): {cu3_error}")
 
+            # CU 8: Invalidar cache de búsquedas para la ciudad
+            try:
+                from services.search import invalidate_search_cache_for_city
+                await invalidate_search_cache_for_city(ciudad_id)
+                logger.info(f"[CU8] Cache invalidado para ciudad_id {ciudad_id} después de crear propiedad")
+            except Exception as cache_error:
+                logger.warning(f"[CU8] Error invalidando cache: {cache_error}")
+                # No fallar la creación de propiedad por error de cache
+
             return {
                 "success": True,
                 "message": f"Propiedad '{nombre}' creada exitosamente",

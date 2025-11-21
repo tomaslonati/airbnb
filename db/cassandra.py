@@ -306,6 +306,8 @@ async def cassandra_add_reserva(reserva_data: dict):
         fecha_fin = reserva_data.get('fecha_fin')
         propiedad_id = reserva_data.get('propiedad_id')
 
+        logger.info(f"[CU6] cassandra_add_reserva llamado con: reserva_id={reserva_id}, host_id={host_id}, fecha_inicio={fecha_inicio}")
+
         # Agregar a reservas por host
         await _add_reserva_por_host(host_id, fecha_inicio, reserva_id, reserva_data)
 
@@ -408,19 +410,21 @@ async def _add_reserva_por_host(host_id: int, fecha, reserva_id: int, reserva_da
         fecha_str = fecha.isoformat() if hasattr(fecha, 'isoformat') else str(fecha)
 
         new_doc = {
-            "host_id": generate_deterministic_uuid(host_id, "host"),
+            "host_id": host_id,
             "fecha": fecha_str,
-            "reserva_id": generate_deterministic_uuid(reserva_id, "reserva"),
-            "propiedad_id": generate_deterministic_uuid(reserva_data.get('propiedad_id'), "propiedad"),
-            "huesped_id": generate_deterministic_uuid(reserva_data.get('huesped_id'), "huesped"),
+            "reserva_id": reserva_id,
+            "propiedad_id": reserva_data.get('propiedad_id'),
+            "huesped_id": reserva_data.get('huesped_id'),
             "status": reserva_data.get('estado', 'confirmada'),
             "total_price": float(reserva_data.get('precio_total', 0))
         }
 
+        logger.info(f"[CU6] Insertando reserva en reservas_por_host_fecha: {new_doc}")
         collection.insert_one(new_doc)
+        logger.info(f"[CU6] ✓ Reserva {reserva_id} insertada exitosamente para host {host_id} en fecha {fecha_str}")
 
     except Exception as e:
-        logger.error(f"Error agregando reserva por host: {e}")
+        logger.error(f"[CU6] ✗ Error agregando reserva por host: {e}")
 
 
 async def _remove_reserva_por_host(host_id: int, fecha, reserva_id: int):
@@ -430,9 +434,9 @@ async def _remove_reserva_por_host(host_id: int, fecha, reserva_id: int):
 
         fecha_str = fecha.isoformat() if hasattr(fecha, 'isoformat') else str(fecha)
         filter_doc = {
-            "host_id": generate_deterministic_uuid(host_id, "host"), 
-            "fecha": fecha_str, 
-            "reserva_id": generate_deterministic_uuid(reserva_id, "reserva")
+            "host_id": host_id,
+            "fecha": fecha_str,
+            "reserva_id": reserva_id
         }
 
         collection.delete_one(filter_doc)
@@ -588,9 +592,8 @@ async def get_reservas_por_host_fecha(host_id: int, fecha, limit: int = 100):
 
         fecha_str = fecha.isoformat() if hasattr(fecha, 'isoformat') else str(fecha)
 
-        # Convertir host_id a string para compatibilidad con UUID
         filter_doc = {
-            "host_id": str(host_id),
+            "host_id": host_id,
             "fecha": fecha_str
         }
 

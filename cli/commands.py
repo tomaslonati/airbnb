@@ -4691,21 +4691,14 @@ async def handle_cu6_reservas_host():
         typer.echo("=" * 60)
 
         host_id_str = typer.prompt(
-            "🏡 ID del host/anfitrión (número entero, se convertirá a UUID)")
+            "🏡 ID del host/anfitrión (número entero)")
 
         try:
-            host_id_int = int(host_id_str)
-            # Convertir entero a UUID string válido para Cassandra
-            # En un caso real, tendrías una tabla de mapeo o usarías UUIDs reales
-            import uuid
-            # Crear un UUID determinístico basado en el ID
-            host_id_uuid = str(uuid.uuid5(
-                uuid.NAMESPACE_DNS, f"host-{host_id_int}"))
-            typer.echo(
-                f"🔄 Convirtiendo host ID {host_id_int} a UUID: {host_id_uuid}")
+            host_id = int(host_id_str)
         except ValueError:
             typer.echo("❌ ID del host debe ser un número entero")
             return
+
         fecha_str = typer.prompt("📅 Fecha (YYYY-MM-DD)")
 
         # Validar fecha
@@ -4719,8 +4712,8 @@ async def handle_cu6_reservas_host():
         service = ReservationService()
 
         typer.echo(
-            f"\n🔄 Buscando reservas del host {host_id_int} para {fecha_str}...")
-        result = await service.get_reservas_host(host_id_uuid, fecha)
+            f"\n🔄 Buscando reservas del host {host_id} para {fecha_str}...")
+        result = await service.get_reservas_host(host_id, fecha)
 
         if result.get("success"):
             reservas = result.get("reservas", [])

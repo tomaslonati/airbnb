@@ -99,11 +99,14 @@ class SearchService:
                 result['cached'] = True
                 return result
 
-            # Cache MISS - consultar Cassandra
+            # Cache MISS - consultar Supabase
             logger.info(f"[CU8] Cache MISS para búsqueda en {ciudad}",
                        ciudad=ciudad, cache_key=cache_key)
 
-            # Obtener ciudad_id
+            # Query Supabase (PostgreSQL)
+            from db import postgres
+
+            # Obtener ciudad_id primero
             ciudad_id = self._get_ciudad_id(ciudad)
 
             if not ciudad_id:
@@ -113,21 +116,63 @@ class SearchService:
                     "cached": False
                 }
 
-            # Query Cassandra
-            from db.cassandra import get_propiedades_ciudad_capacidad_wifi
+            pool = await postgres.get_client()
 
-            propiedades = await get_propiedades_ciudad_capacidad_wifi(
-                ciudad_id=ciudad_id,
-                min_capacidad=capacidad_minima or 1,
-                wifi_required=True
-            )
+            # Query para obtener propiedades con WiFi
+            query = """
+                SELECT DISTINCT
+                    p.id AS propiedad_id,
+                    p.nombre AS propiedad_nombre,
+                    p.capacidad AS capacidad_huespedes,
+                    p.ciudad_id,
+                    c.nombre AS ciudad_nombre,
+                    COALESCE(
+                        (SELECT AVG(price_per_night)
+                         FROM propiedad_disponibilidad pd
+                         WHERE pd.propiedad_id = p.id
+                         AND pd.disponible = TRUE
+                         AND pd.price_per_night IS NOT NULL),
+                        0
+                    ) AS precio_noche,
+                    TRUE AS wifi
+                FROM propiedad p
+                INNER JOIN ciudad c ON p.ciudad_id = c.id
+                INNER JOIN propiedad_servicio ps ON p.id = ps.propiedad_id
+                INNER JOIN servicios s ON ps.servicio_id = s.id
+                WHERE
+                    p.ciudad_id = $1
+                    AND p.capacidad >= $2
+                    AND (LOWER(s.descripcion) LIKE '%wifi%' OR LOWER(s.descripcion) LIKE '%internet%')
+            """
 
-            # Filtrar por precio si se especifica
+            params = [ciudad_id, capacidad_minima or 1]
+
+            # Agregar filtro de precio si se especifica
             if precio_maximo:
-                propiedades = [
-                    p for p in propiedades
-                    if p.get('precio_noche', 0) <= precio_maximo
-                ]
+                query += """
+                    AND (
+                        SELECT AVG(price_per_night)
+                        FROM propiedad_disponibilidad pd
+                        WHERE pd.propiedad_id = p.id
+                        AND pd.disponible = TRUE
+                        AND pd.price_per_night IS NOT NULL
+                    ) <= $3
+                """
+                params.append(precio_maximo)
+
+            # Ejecutar query
+            rows = await pool.fetch(query, *params)
+
+            # Convertir resultados a lista de diccionarios y convertir Decimals a float
+            from decimal import Decimal
+            propiedades = []
+            for row in rows:
+                prop_dict = dict(row)
+                # Convertir Decimal a float para serialización JSON
+                for key, value in prop_dict.items():
+                    if isinstance(value, Decimal):
+                        prop_dict[key] = float(value)
+                propiedades.append(prop_dict)
 
             # Preparar resultado
             result = {

@@ -6,6 +6,7 @@ import asyncio
 from typing import Optional, List, Dict, Any
 from db import postgres
 from utils.logging import get_logger
+from utils.performance import measure_time, perf_stats
 
 logger = get_logger(__name__)
 
@@ -25,7 +26,7 @@ class PropertyService:
     ) -> tuple[bool, Optional[str]]:
         """
         Valida que todos los IDs externos existan.
-        
+
         Returns:
             (is_valid, error_message)
         """
@@ -109,7 +110,8 @@ class PropertyService:
 
             ciudades_list = [dict(ciudad) for ciudad in ciudades]
 
-            logger.info(f"Ciudades disponibles obtenidas: {len(ciudades_list)}")
+            logger.info(
+                f"Ciudades disponibles obtenidas: {len(ciudades_list)}")
             return {
                 "success": True,
                 "items": ciudades_list
@@ -278,6 +280,7 @@ class PropertyService:
             logger.error(f"Error obteniendo host_id desde auth: {e}")
             return None
 
+    @measure_time("Creación de propiedad")
     async def create_property(
         self,
         nombre: str,
@@ -294,7 +297,7 @@ class PropertyService:
         servicios: Optional[List[int]] = None,
         reglas: Optional[List[int]] = None,
         generar_calendario: bool = True,
-        dias_calendario: int = 365,
+        dias_calendario: int = 90,  # Reducido de 365 a 90 días para mejor UX
     ) -> Dict[str, Any]:
         """
         Crea una nueva propiedad de forma atómica.
@@ -321,7 +324,7 @@ class PropertyService:
         """
         try:
             pool = await postgres.get_client()
-            
+
             # Si viene auth_user_id, resolver anfitrion_id
             if auth_user_id and not anfitrion_id:
                 anfitrion_id = await self._get_host_id_from_auth(pool, auth_user_id)
@@ -330,7 +333,7 @@ class PropertyService:
                         "success": False,
                         "error": "Usuario no está registrado como anfitrión"
                     }
-            
+
             if not anfitrion_id:
                 return {
                     "success": False,
@@ -359,71 +362,119 @@ class PropertyService:
 
             logger.info(f"Creando propiedad: {nombre}")
 
-            # TRANSACCIÓN ATÓMICA: Iniciar
+            # TRANSACCIÓN ATÓMICA: Iniciar con timeout para evitar bloqueos
             async with pool.acquire() as conn:
-                async with conn.transaction():
-                    # 1. Crear la propiedad
-                    query = """
-                        INSERT INTO propiedad (
-                            nombre, descripcion, capacidad,
-                            ciudad_id, anfitrion_id, tipo_propiedad_id,
-                            imagenes
-                        )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7)
-                        RETURNING id, nombre, descripcion, capacidad
-                    """
+                try:
+                    async with conn.transaction():
+                        # 1. Crear la propiedad
+                        query = """
+                            INSERT INTO propiedad (
+                                nombre, descripcion, capacidad,
+                                ciudad_id, anfitrion_id, tipo_propiedad_id,
+                                imagenes
+                            )
+                            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                            RETURNING id, nombre, descripcion, capacidad
+                        """
 
-                    result = await conn.fetchrow(
-                        query,
-                        nombre,
-                        descripcion,
-                        capacidad,
-                        ciudad_id,
-                        anfitrion_id,
-                        tipo_propiedad_id,
-                        imagenes or []
-                    )
-
-                    propiedad_id = result['id']
-
-                    # 2. Actualizar horarios si fueron proporcionados
-                    if horario_check_in is not None or horario_check_out is not None:
-                        try:
-                            horario_query = """
-                                UPDATE propiedad
-                                SET horario_check_in = $2, horario_check_out = $3
-                                WHERE id = $1
-                            """
-                            logger.info(f"Actualizando horarios para propiedad {propiedad_id}: in={horario_check_in}, out={horario_check_out}")
-                            await conn.execute(horario_query, propiedad_id, horario_check_in, horario_check_out)
-                            logger.info(f"Horarios actualizados exitosamente para propiedad {propiedad_id}")
-                        except Exception as horario_error:
-                            logger.error(f"Error al actualizar horarios: {horario_error}")
-                            # No fallar el proceso completo por esto
-                            pass
-
-                    propiedad_id = result['id']
-                    logger.info(f"Propiedad creada con ID: {propiedad_id}")
-
-                    # 2. Agregar amenities (dentro de la transacción)
-                    if amenities:
-                        await self._add_amenities(conn, propiedad_id, amenities)
-
-                    # 3. Agregar servicios (dentro de la transacción)
-                    if servicios:
-                        await self._add_servicios(conn, propiedad_id, servicios)
-
-                    # 4. Agregar reglas (dentro de la transacción)
-                    if reglas:
-                        await self._add_reglas(conn, propiedad_id, reglas)
-
-                    # 5. Generar calendario base (dentro de la transacción)
-                    if generar_calendario:
-                        await self._generate_availability(
-                            conn, propiedad_id, dias_calendario
+                        result = await conn.fetchrow(
+                            query,
+                            nombre,
+                            descripcion,
+                            capacidad,
+                            ciudad_id,
+                            anfitrion_id,
+                            tipo_propiedad_id,
+                            imagenes or []
                         )
 
-            logger.info(f"Propiedad {propiedad_id} creada exitosamente con todas las relaciones")
+                        propiedad_id = result['id']
+
+                        # 2. Actualizar horarios si fueron proporcionados
+                        if horario_check_in is not None or horario_check_out is not None:
+                            try:
+                                horario_query = """
+                                    UPDATE propiedad
+                                    SET horario_check_in = $2, horario_check_out = $3
+                                    WHERE id = $1
+                                """
+                                logger.info(
+                                    f"Actualizando horarios para propiedad {propiedad_id}: in={horario_check_in}, out={horario_check_out}")
+                                await conn.execute(horario_query, propiedad_id, horario_check_in, horario_check_out)
+                                logger.info(
+                                    f"Horarios actualizados exitosamente para propiedad {propiedad_id}")
+                            except Exception as horario_error:
+                                logger.error(
+                                    f"Error al actualizar horarios: {horario_error}")
+                                # No fallar el proceso completo por esto
+                                pass
+
+                        propiedad_id = result['id']
+                        logger.info(f"Propiedad creada con ID: {propiedad_id}")
+
+                        # CORRECCIÓN: Ejecutar operaciones SECUENCIALMENTE dentro de la transacción
+                        # (No podemos paralelizar operaciones que usan la misma conexión DB)
+                        
+                        if amenities:
+                            await self._add_amenities(conn, propiedad_id, amenities)
+                        if servicios:
+                            await self._add_servicios(conn, propiedad_id, servicios)
+                        if reglas:
+                            await self._add_reglas(conn, propiedad_id, reglas)
+
+                        # 5. Generar calendario base (dentro de la transacción)
+                        if generar_calendario:
+                            await self._generate_availability(
+                                conn, propiedad_id, dias_calendario, ciudad_id
+                            )
+                            
+                except Exception as tx_error:
+                    logger.error(f"Error en transacción de creación: {tx_error}")
+                    # La transacción se revierte automáticamente
+                    raise
+
+            logger.info(
+                f"Propiedad {propiedad_id} creada exitosamente con todas las relaciones")
+
+            # CASSANDRA SYNC: Ejecutar fuera de la transacción principal
+            if hasattr(self, '_cassandra_fechas_pendientes') and self._cassandra_fechas_pendientes:
+                prop_id, fechas_cassandra, ciudad_id_cassandra = self._cassandra_fechas_pendientes
+                try:
+                    # Importar aquí para evitar import circular
+                    import asyncio
+                    from db.cassandra import cassandra_init_date
+                    
+                    # Validar que tenemos datos válidos
+                    if prop_id and fechas_cassandra and ciudad_id_cassandra:
+                        # Sync en segundo plano para no bloquear la respuesta
+                        if len(fechas_cassandra) <= 30:
+                            await cassandra_init_date(prop_id, fechas_cassandra, ciudad_id_cassandra)
+                            logger.info(f"✅ Cassandra sincronizada para propiedad {prop_id}")
+                        else:
+                            # Para volúmenes grandes, ejecutar en background
+                            asyncio.create_task(self._sync_cassandra_background(prop_id, fechas_cassandra, ciudad_id_cassandra))
+                            logger.info(f"🚀 Cassandra ({len(fechas_cassandra)} fechas) se sincronizará en segundo plano")
+                    else:
+                        logger.warning("⚠️  Datos de Cassandra incompletos, omitiendo sincronización")
+                        
+                except Exception as cassandra_error:
+                    logger.warning(f"⚠️  Error en sync Cassandra (no crítico): {cassandra_error}")
+                finally:
+                    # Limpiar datos pendientes
+                    self._cassandra_fechas_pendientes = None
+
+            # CU3 CASSANDRA SYNC: Sincronizar con colección optimizada para CU3
+            try:
+                from db.cassandra import cassandra_sync_propiedad_cu3
+                await cassandra_sync_propiedad_cu3(
+                    propiedad_id=propiedad_id,
+                    ciudad_id=ciudad_id,
+                    nombre=nombre,
+                    capacidad=capacidad,
+                    servicios_ids=servicios or []
+                )
+            except Exception as cu3_error:
+                logger.warning(f"⚠️  Error en sync CU3 Cassandra (no crítico): {cu3_error}")
 
             return {
                 "success": True,
@@ -440,98 +491,158 @@ class PropertyService:
             }
 
     async def _add_amenities(self, conn, propiedad_id: int, amenity_ids: List[int]):
-        """Agrega amenities a una propiedad (dentro de transacción)."""
+        """Agrega amenities a una propiedad usando batch operations (dentro de transacción)."""
         try:
-            query = """
+            if not amenity_ids:
+                return
+                
+            # OPTIMIZACIÓN: Construir query con VALUES múltiples para mejor rendimiento
+            values_placeholder = ",".join([f"(${i*2+1}, ${i*2+2})" for i in range(len(amenity_ids))])
+            query = f"""
                 INSERT INTO propiedad_amenity (propiedad_id, amenity_id)
-                VALUES ($1, $2)
+                VALUES {values_placeholder}
                 ON CONFLICT DO NOTHING
             """
             
+            # Aplanar los datos para la query
+            query_args = []
             for amenity_id in amenity_ids:
-                await conn.execute(query, propiedad_id, amenity_id)
+                query_args.extend([propiedad_id, amenity_id])
             
-            logger.info(f"Agregados {len(amenity_ids)} amenities a propiedad {propiedad_id}")
+            await conn.execute(query, *query_args)
+
+            logger.info(
+                f"Agregados {len(amenity_ids)} amenities a propiedad {propiedad_id}")
         except Exception as e:
             logger.error(f"Error al agregar amenities: {e}")
             raise
 
     async def _add_servicios(self, conn, propiedad_id: int, servicio_ids: List[int]):
-        """Agrega servicios a una propiedad (dentro de transacción)."""
+        """Agrega servicios a una propiedad usando batch operations (dentro de transacción)."""
         try:
-            query = """
+            if not servicio_ids:
+                return
+                
+            # OPTIMIZACIÓN: Construir query con VALUES múltiples
+            values_placeholder = ",".join([f"(${i*2+1}, ${i*2+2})" for i in range(len(servicio_ids))])
+            query = f"""
                 INSERT INTO propiedad_servicio (propiedad_id, servicio_id)
-                VALUES ($1, $2)
+                VALUES {values_placeholder}
                 ON CONFLICT DO NOTHING
             """
             
+            # Aplanar los datos para la query
+            query_args = []
             for servicio_id in servicio_ids:
-                await conn.execute(query, propiedad_id, servicio_id)
+                query_args.extend([propiedad_id, servicio_id])
             
-            logger.info(f"Agregados {len(servicio_ids)} servicios a propiedad {propiedad_id}")
+            await conn.execute(query, *query_args)
+
+            logger.info(
+                f"Agregados {len(servicio_ids)} servicios a propiedad {propiedad_id}")
         except Exception as e:
             logger.error(f"Error al agregar servicios: {e}")
             raise
 
     async def _add_reglas(self, conn, propiedad_id: int, regla_ids: List[int]):
-        """Agrega reglas a una propiedad (dentro de transacción)."""
+        """Agrega reglas a una propiedad usando batch operations (dentro de transacción)."""
         try:
-            query = """
+            if not regla_ids:
+                return
+                
+            # OPTIMIZACIÓN: Construir query con VALUES múltiples
+            values_placeholder = ",".join([f"(${i*2+1}, ${i*2+2})" for i in range(len(regla_ids))])
+            query = f"""
                 INSERT INTO propiedad_regla (propiedad_id, regla_id)
-                VALUES ($1, $2)
+                VALUES {values_placeholder}
                 ON CONFLICT DO NOTHING
             """
             
+            # Aplanar los datos para la query
+            query_args = []
             for regla_id in regla_ids:
-                await conn.execute(query, propiedad_id, regla_id)
+                query_args.extend([propiedad_id, regla_id])
             
-            logger.info(f"Agregadas {len(regla_ids)} reglas a propiedad {propiedad_id}")
+            await conn.execute(query, *query_args)
+
+            logger.info(
+                f"Agregadas {len(regla_ids)} reglas a propiedad {propiedad_id}")
         except Exception as e:
             logger.error(f"Error al agregar reglas: {e}")
             raise
 
     async def _generate_availability(
-        self, 
-        conn, 
-        propiedad_id: int, 
-        dias: int = 365
+        self,
+        conn,
+        propiedad_id: int,
+        dias: int = 365,
+        ciudad_id: int = None
     ):
-        """Genera disponibilidad base para los próximos N días."""
+        """Genera disponibilidad base para los próximos N días usando batch operations."""
         try:
             from datetime import datetime, timedelta
+            import asyncio
             from db.cassandra import cassandra_init_date
+
+            fecha_inicio = datetime.now().date()
+            tarifa_base = 100.0  # Tarifa por defecto
+
+            # Preparar todos los datos en memoria primero
+            fechas_data = []
+            fechas_cassandra = []
             
+            for i in range(dias):
+                fecha = fecha_inicio + timedelta(days=i)
+                fechas_data.append((propiedad_id, fecha, tarifa_base))
+                fechas_cassandra.append(fecha)
+
+            # SIMPLIFICACIÓN: Eliminar chunking que puede causar problemas de transacción
             query = """
                 INSERT INTO fecha (propiedad_id, fecha, tarifa, esta_disponible)
                 VALUES ($1, $2, $3, true)
                 ON CONFLICT DO NOTHING
             """
             
-            fecha_inicio = datetime.now().date()
-            tarifa_base = 100.0  # Tarifa por defecto
+            logger.info(f"📦 Insertando {len(fechas_data)} fechas en PostgreSQL")
             
-            # Preparar lote de fechas para Cassandra
-            fechas_cassandra = []
-            
-            for i in range(dias):
-                fecha = fecha_inicio + timedelta(days=i)
-                await conn.execute(query, propiedad_id, fecha, tarifa_base)
-                
-                # Acumular fechas para sync con Cassandra
-                fechas_cassandra.append(fecha)
-            
-            logger.info(f"Generado calendario para {dias} días para propiedad {propiedad_id}")
-            
-            # Sincronizar con Cassandra usando batch operations
             try:
-                if fechas_cassandra:
-                    await cassandra_init_date(propiedad_id, fechas_cassandra)
-                    logger.info(f"Sincronizada disponibilidad inicial en Cassandra para propiedad {propiedad_id}")
-            except Exception as cassandra_error:
-                logger.error(f"Error al sincronizar disponibilidad inicial con Cassandra para propiedad {propiedad_id}: {cassandra_error}")
-                # No fallar el proceso completo por errores de Cassandra
-                pass
+                # Una sola operación executemany para evitar problemas de transacción
+                await conn.executemany(query, fechas_data)
+                logger.info(f"✅ PostgreSQL: {dias} fechas insertadas exitosamente")
                 
+            except Exception as db_error:
+                logger.error(f"❌ Error insertando fechas: {db_error}")
+                raise  # Re-levantar para que se revierta la transacción
+            
+            logger.info(f"📅 Calendario de {dias} días generado para propiedad {propiedad_id}")
+
+            # SIMPLIFICACIÓN: Cassandra sync después de que se complete la transacción principal
+            # Esto se ejecutará FUERA de la transacción para evitar conflictos
+            if ciudad_id is not None:
+                self._cassandra_fechas_pendientes = (propiedad_id, fechas_cassandra, ciudad_id)
+            else:
+                logger.warning(f"⚠️  No se puede sincronizar Cassandra: ciudad_id no proporcionado para propiedad {propiedad_id}")
+            
+            async def sync_cassandra():
+                """Sincroniza con Cassandra en segundo plano."""
+                try:
+                    if fechas_cassandra:
+                        await cassandra_init_date(propiedad_id, fechas_cassandra, ciudad_id)
+                        logger.info(
+                            f"✅ Cassandra: Sincronizada disponibilidad inicial para propiedad {propiedad_id}")
+                except Exception as cassandra_error:
+                    logger.warning(
+                        f"⚠️  Cassandra sync falló (no crítico): {cassandra_error}")
+            
+            # Ejecutar Cassandra en segundo plano si hay muchas fechas
+            if len(fechas_cassandra) > 30:
+                # Para volúmenes grandes, hacer sync asíncrono
+                asyncio.create_task(sync_cassandra())
+                logger.info("🚀 Cassandra se sincronizará en segundo plano")
+            else:
+                # Para volúmenes pequeños, hacer sync inmediato
+                await sync_cassandra()
+
         except Exception as e:
             logger.error(f"Error al generar disponibilidad: {e}")
             raise
@@ -540,7 +651,7 @@ class PropertyService:
         """Obtiene los detalles completos de una propiedad incluyendo relaciones."""
         try:
             pool = await postgres.get_client()
-            
+
             # Obtener propiedad base
             prop_query = """
                 SELECT p.*, c.nombre as ciudad, t.nombre as tipo_propiedad
@@ -549,12 +660,12 @@ class PropertyService:
                 JOIN tipo_propiedad t ON p.tipo_propiedad_id = t.id
                 WHERE p.id = $1
             """
-            
+
             prop = await pool.fetchrow(prop_query, propiedad_id)
-            
+
             if not prop:
                 return {"success": False, "error": "Propiedad no encontrada"}
-            
+
             # Obtener amenities
             amenities = await pool.fetch(
                 """
@@ -565,7 +676,7 @@ class PropertyService:
                 """,
                 propiedad_id
             )
-            
+
             # Obtener servicios
             servicios = await pool.fetch(
                 """
@@ -576,7 +687,7 @@ class PropertyService:
                 """,
                 propiedad_id
             )
-            
+
             # Obtener reglas
             reglas = await pool.fetch(
                 """
@@ -587,7 +698,7 @@ class PropertyService:
                 """,
                 propiedad_id
             )
-            
+
             return {
                 "success": True,
                 "property": {
@@ -597,7 +708,7 @@ class PropertyService:
                     "reglas": [dict(r) for r in reglas]
                 }
             }
-            
+
         except Exception as e:
             logger.error(f"Error al obtener propiedad: {e}")
             return {"success": False, "error": str(e)}
@@ -606,7 +717,7 @@ class PropertyService:
         """Lista todas las propiedades de una ciudad."""
         try:
             pool = await postgres.get_client()
-            
+
             query = """
                 SELECT p.*, c.nombre as ciudad, t.nombre as tipo_propiedad
                 FROM propiedad p
@@ -615,15 +726,15 @@ class PropertyService:
                 WHERE p.ciudad_id = $1
                 ORDER BY p.nombre
             """
-            
+
             results = await pool.fetch(query, ciudad_id)
-            
+
             return {
                 "success": True,
                 "total": len(results),
                 "properties": [dict(r) for r in results]
             }
-            
+
         except Exception as e:
             logger.error(f"Error al listar propiedades: {e}")
             return {"success": False, "error": str(e)}
@@ -632,7 +743,7 @@ class PropertyService:
         """Lista todas las propiedades de un anfitrión."""
         try:
             pool = await postgres.get_client()
-            
+
             query = """
                 SELECT p.*, c.nombre as ciudad, t.nombre as tipo_propiedad
                 FROM propiedad p
@@ -641,15 +752,15 @@ class PropertyService:
                 WHERE p.anfitrion_id = $1
                 ORDER BY p.nombre
             """
-            
+
             results = await pool.fetch(query, anfitrion_id)
-            
+
             return {
                 "success": True,
                 "total": len(results),
                 "properties": [dict(r) for r in results]
             }
-            
+
         except Exception as e:
             logger.error(f"Error al listar propiedades del anfitrión: {e}")
             return {"success": False, "error": str(e)}
@@ -797,18 +908,18 @@ class PropertyService:
     async def delete_property(self, property_id: int) -> Dict[str, Any]:
         """
         Elimina una propiedad y todas sus relaciones (en transacción).
-        
+
         Args:
             property_id: ID de la propiedad a eliminar
-            
+
         Returns:
             Resultado de la eliminación
         """
         try:
             pool = await postgres.get_client()
-            
+
             logger.info(f"Eliminando propiedad {property_id}")
-            
+
             # TRANSACCIÓN ATÓMICA: Eliminar propiedad y todas las relaciones
             async with pool.acquire() as conn:
                 async with conn.transaction():
@@ -817,50 +928,59 @@ class PropertyService:
                         "DELETE FROM propiedad_amenity WHERE propiedad_id = $1",
                         property_id
                     )
-                    
+
                     # 2. Eliminar servicios
                     await conn.execute(
                         "DELETE FROM propiedad_servicio WHERE propiedad_id = $1",
                         property_id
                     )
-                    
+
                     # 3. Eliminar reglas
                     await conn.execute(
                         "DELETE FROM propiedad_regla WHERE propiedad_id = $1",
                         property_id
                     )
-                    
+
                     # 4. Eliminar disponibilidad (calendario)
                     await conn.execute(
                         "DELETE FROM fecha WHERE propiedad_id = $1",
                         property_id
                     )
-                    
+
                     # 5. Eliminar reservas (si existen)
                     await conn.execute(
                         "DELETE FROM reserva WHERE propiedad_id = $1",
                         property_id
                     )
-                    
+
                     # 6. Finalmente, eliminar la propiedad
                     result = await conn.fetchval(
                         "DELETE FROM propiedad WHERE id = $1 RETURNING id",
                         property_id
                     )
-            
+
             if result is None:
                 return {
                     "success": False,
                     "error": f"Propiedad con ID {property_id} no existe"
                 }
-            
+
             logger.info(f"Propiedad {property_id} eliminada exitosamente")
-            
+
             return {
                 "success": True,
                 "message": f"Propiedad {property_id} eliminada con todas sus relaciones"
             }
-            
+
         except Exception as e:
             logger.error(f"Error al eliminar propiedad: {e}")
             return {"success": False, "error": str(e)}
+
+    async def _sync_cassandra_background(self, propiedad_id: int, fechas: list, ciudad_id: int):
+        """Sincroniza Cassandra en segundo plano para volúmenes grandes."""
+        try:
+            from db.cassandra import cassandra_init_date
+            await cassandra_init_date(propiedad_id, fechas, ciudad_id)
+            logger.info(f"✅ Cassandra background sync completado para propiedad {propiedad_id}")
+        except Exception as e:
+            logger.warning(f"⚠️  Cassandra background sync falló para propiedad {propiedad_id}: {e}")

@@ -13,7 +13,7 @@ load_dotenv()
 
 class DatabaseConfig(BaseSettings):
     """Configuración de todas las bases de datos."""
-    
+
     model_config = ConfigDict(extra='ignore')
 
     # AstraDB/Cassandra - DataAPI
@@ -31,6 +31,9 @@ class DatabaseConfig(BaseSettings):
     neo4j_user: str = os.getenv("NEO4J_USER", "neo4j")
     neo4j_password: str = os.getenv("NEO4J_PASSWORD", "")
     neo4j_database: str = os.getenv("NEO4J_DATABASE", "neo4j")
+    # Fallback IPs para problemas DNS
+    neo4j_fallback_ip: str = os.getenv("NEO4J_FALLBACK_IP", "34.205.14.132")
+    neo4j_enable_fallback: bool = os.getenv("NEO4J_ENABLE_FALLBACK", "true").lower() == "true"
 
     # MongoDB Atlas
     mongo_connection_string: str = os.getenv("MONGO_CONNECTION_STRING", "")

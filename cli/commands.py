@@ -46,7 +46,8 @@ app = typer.Typer(
 # Integrar sub-apps de features
 app.add_typer(auth_app, name="auth", help="Comandos de autenticación")
 app.add_typer(properties_app, name="properties", help="Gestión de propiedades")
-app.add_typer(reservations_app, name="reservations", help="Gestión de reservas")
+app.add_typer(reservations_app, name="reservations",
+              help="Gestión de reservas")
 
 
 @app.callback(invoke_without_command=True)
@@ -435,7 +436,7 @@ async def manage_availability_interactive(user_profile: dict, property_service):
     """Gestiona la disponibilidad de propiedades de manera interactiva."""
     typer.echo("\n📅 Gestión de Disponibilidad")
     typer.echo("="*40)
-    
+
     # Obtener propiedades del usuario
     try:
         properties = await property_service.get_properties_by_user_id(user_profile["user_id"])
@@ -445,39 +446,42 @@ async def manage_availability_interactive(user_profile: dict, property_service):
     except Exception as e:
         typer.echo(f"❌ Error al obtener propiedades: {e}")
         return
-    
+
     # Mostrar propiedades disponibles
     typer.echo("\n🏠 Tus propiedades:")
     for i, property in enumerate(properties, 1):
-        typer.echo(f"{i}. {property.get('nombre', 'Sin nombre')} (ID: {property.get('propiedad_id')})")
-    
+        typer.echo(
+            f"{i}. {property.get('nombre', 'Sin nombre')} (ID: {property.get('propiedad_id')})")
+
     # Seleccionar propiedad
     try:
-        prop_choice = typer.prompt("\nSelecciona el número de la propiedad", type=int)
+        prop_choice = typer.prompt(
+            "\nSelecciona el número de la propiedad", type=int)
         if prop_choice < 1 or prop_choice > len(properties):
             typer.echo("❌ Selección inválida.")
             return
-        
+
         selected_property = properties[prop_choice - 1]
         property_id = selected_property.get('propiedad_id')
-        
+
     except ValueError:
         typer.echo("❌ Por favor ingresa un número válido.")
         return
-    
+
     # Menú de opciones de disponibilidad
     while True:
-        typer.echo(f"\n📅 Disponibilidad - {selected_property.get('nombre', 'Sin nombre')}")
+        typer.echo(
+            f"\n📅 Disponibilidad - {selected_property.get('nombre', 'Sin nombre')}")
         typer.echo("1. 📊 Ver disponibilidad actual")
         typer.echo("2. 🚫 Bloquear fechas")
         typer.echo("3. ✅ Liberar fechas")
         typer.echo("4. 📅 Ver calendario mensual")
         typer.echo("5. 🔧 Generar disponibilidad automática")
         typer.echo("6. ↩️  Volver")
-        
+
         try:
             choice = typer.prompt("\nSelecciona una opción (1-6)", type=int)
-            
+
             if choice == 1:
                 await view_availability_status(property_id)
             elif choice == 2:
@@ -492,7 +496,7 @@ async def manage_availability_interactive(user_profile: dict, property_service):
                 break
             else:
                 typer.echo("❌ Opción inválida. Selecciona entre 1 y 6.")
-                
+
         except ValueError:
             typer.echo("❌ Por favor ingresa un número válido.")
 
@@ -501,43 +505,46 @@ async def view_availability_status(property_id: int):
     """Muestra el estado actual de disponibilidad de una propiedad."""
     typer.echo(f"\n📊 Estado de disponibilidad para propiedad {property_id}")
     typer.echo("="*50)
-    
+
     # Mostrar próximas fechas disponibles
     from datetime import datetime, timedelta
     start_date = datetime.now().date()
     end_date = start_date + timedelta(days=30)
-    
+
     typer.echo(f"📅 Próximos 30 días (desde {start_date} hasta {end_date})")
     typer.echo("\nPara ver más detalles, usa el comando:")
-    typer.echo(f"python main.py properties availability consultar --propiedad-id {property_id} --fecha-inicio {start_date} --fecha-fin {end_date}")
+    typer.echo(
+        f"python main.py properties availability consultar --propiedad-id {property_id} --fecha-inicio {start_date} --fecha-fin {end_date}")
 
 
 async def block_dates_interactive(property_id: int):
     """Bloquea fechas de manera interactiva."""
     typer.echo(f"\n🚫 Bloquear fechas - Propiedad {property_id}")
     typer.echo("="*40)
-    
+
     try:
         fecha_inicio = typer.prompt("Fecha de inicio (YYYY-MM-DD)")
         fecha_fin = typer.prompt("Fecha de fin (YYYY-MM-DD)")
-        motivo = typer.prompt("Motivo del bloqueo (opcional)", default="Bloqueado por el anfitrión")
-        
+        motivo = typer.prompt("Motivo del bloqueo (opcional)",
+                              default="Bloqueado por el anfitrión")
+
         # Validar formato de fechas
         from datetime import datetime
         datetime.strptime(fecha_inicio, "%Y-%m-%d")
         datetime.strptime(fecha_fin, "%Y-%m-%d")
-        
+
         typer.echo(f"\nEjecutando bloqueo...")
-        typer.echo(f"Comando: python main.py properties availability bloquear --propiedad-id {property_id} --fecha-inicio {fecha_inicio} --fecha-fin {fecha_fin} --motivo '{motivo}'")
-        
+        typer.echo(
+            f"Comando: python main.py properties availability bloquear --propiedad-id {property_id} --fecha-inicio {fecha_inicio} --fecha-fin {fecha_fin} --motivo '{motivo}'")
+
         # Aquí se ejecutaría el comando real
         from services.reservations import ReservationService
         reservation_service = ReservationService()
-        
+
         # El comando real sería:
         # await reservation_service.mark_dates_unavailable(property_id, fecha_inicio, fecha_fin, motivo)
         typer.echo("✅ Fechas bloqueadas correctamente")
-        
+
     except ValueError:
         typer.echo("❌ Formato de fecha inválido. Usa YYYY-MM-DD")
     except Exception as e:
@@ -548,30 +555,32 @@ async def unblock_dates_interactive(property_id: int):
     """Libera fechas bloqueadas de manera interactiva."""
     typer.echo(f"\n✅ Liberar fechas - Propiedad {property_id}")
     typer.echo("="*40)
-    
+
     try:
         fecha_inicio = typer.prompt("Fecha de inicio (YYYY-MM-DD)")
         fecha_fin = typer.prompt("Fecha de fin (YYYY-MM-DD)")
-        precio = typer.prompt("Precio por noche (opcional)", type=float, default=0.0)
-        
+        precio = typer.prompt(
+            "Precio por noche (opcional)", type=float, default=0.0)
+
         # Validar formato de fechas
         from datetime import datetime
         datetime.strptime(fecha_inicio, "%Y-%m-%d")
         datetime.strptime(fecha_fin, "%Y-%m-%d")
-        
+
         precio_str = f" --precio {precio}" if precio > 0 else ""
-        
+
         typer.echo(f"\nEjecutando liberación...")
-        typer.echo(f"Comando: python main.py properties availability liberar --propiedad-id {property_id} --fecha-inicio {fecha_inicio} --fecha-fin {fecha_fin}{precio_str}")
-        
+        typer.echo(
+            f"Comando: python main.py properties availability liberar --propiedad-id {property_id} --fecha-inicio {fecha_inicio} --fecha-fin {fecha_fin}{precio_str}")
+
         # Aquí se ejecutaría el comando real
         from services.reservations import ReservationService
         reservation_service = ReservationService()
-        
+
         # El comando real sería:
         # await reservation_service.mark_dates_available(property_id, fecha_inicio, fecha_fin, precio)
         typer.echo("✅ Fechas liberadas correctamente")
-        
+
     except ValueError:
         typer.echo("❌ Formato de fecha inválido. Usa YYYY-MM-DD")
     except Exception as e:
@@ -582,22 +591,23 @@ async def show_calendar_interactive(property_id: int):
     """Muestra el calendario de disponibilidad de manera interactiva."""
     typer.echo(f"\n📅 Calendario - Propiedad {property_id}")
     typer.echo("="*40)
-    
+
     from datetime import datetime
     current_month = datetime.now().strftime("%Y-%m")
-    
+
     month = typer.prompt(f"Mes a mostrar (YYYY-MM)", default=current_month)
-    
+
     try:
         # Validar formato
         datetime.strptime(month, "%Y-%m")
-        
+
         typer.echo(f"\n📅 Mostrando calendario para {month}...")
-        typer.echo(f"Comando: python main.py properties calendar --propiedad-id {property_id} --mes {month}")
-        
+        typer.echo(
+            f"Comando: python main.py properties calendar --propiedad-id {property_id} --mes {month}")
+
         # Aquí se ejecutaría el comando real para mostrar el calendario
         typer.echo("✅ Calendario mostrado")
-        
+
     except ValueError:
         typer.echo("❌ Formato de mes inválido. Usa YYYY-MM")
 
@@ -606,23 +616,24 @@ async def generate_availability_interactive(property_id: int):
     """Genera disponibilidad automática de manera interactiva."""
     typer.echo(f"\n🔧 Generar disponibilidad - Propiedad {property_id}")
     typer.echo("="*50)
-    
+
     try:
         fecha_inicio = typer.prompt("Fecha de inicio (YYYY-MM-DD)")
         fecha_fin = typer.prompt("Fecha de fin (YYYY-MM-DD)")
         precio = typer.prompt("Precio base por noche", type=float)
-        
+
         # Validar formato de fechas
         from datetime import datetime
         datetime.strptime(fecha_inicio, "%Y-%m-%d")
         datetime.strptime(fecha_fin, "%Y-%m-%d")
-        
+
         typer.echo(f"\nGenerando disponibilidad automática...")
-        typer.echo(f"Comando: python main.py properties availability generar --propiedad-id {property_id} --fecha-inicio {fecha_inicio} --fecha-fin {fecha_fin} --precio-base {precio}")
-        
+        typer.echo(
+            f"Comando: python main.py properties availability generar --propiedad-id {property_id} --fecha-inicio {fecha_inicio} --fecha-fin {fecha_fin} --precio-base {precio}")
+
         # Aquí se ejecutaría el comando real
         typer.echo("✅ Disponibilidad generada correctamente")
-        
+
     except ValueError as ve:
         if "fecha" in str(ve).lower():
             typer.echo("❌ Formato de fecha inválido. Usa YYYY-MM-DD")
@@ -948,26 +959,27 @@ async def delete_property_interactive(user_profile, PropertyService):
 async def handle_properties_menu(user_profile):
     """Gestiona las propiedades del anfitrión."""
     from services.properties import PropertyService
-    
+
     # Verificar que el usuario sea anfitrión
     if user_profile.rol not in ['ANFITRION', 'AMBOS']:
         typer.echo("❌ Esta función solo está disponible para anfitriones")
         typer.echo("Presiona Enter para continuar...")
         input()
         return
-    
+
     if not user_profile.anfitrion_id:
         typer.echo("❌ No se encontró ID de anfitrión")
         typer.echo("Presiona Enter para continuar...")
         input()
         return
-    
+
     property_service = PropertyService()
-    
+
     while True:
         typer.echo("\n🏠 GESTIÓN DE PROPIEDADES")
         typer.echo("=" * 50)
-        typer.echo(f"👤 Anfitrión: {user_profile.nombre} (ID: {user_profile.anfitrion_id})")
+        typer.echo(
+            f"👤 Anfitrión: {user_profile.nombre} (ID: {user_profile.anfitrion_id})")
         typer.echo("-" * 50)
         typer.echo("1. 📋 Ver mis propiedades")
         typer.echo("2. ➕ Crear nueva propiedad")
@@ -975,10 +987,10 @@ async def handle_properties_menu(user_profile):
         typer.echo("4. ✏️  Editar propiedad")
         typer.echo("5. 🗑️  Eliminar propiedad")
         typer.echo("6. ⬅️  Volver al menú principal")
-        
+
         try:
             choice = typer.prompt("Selecciona una opción (1-6)", type=int)
-            
+
             if choice == 1:
                 # Listar propiedades
                 await show_host_properties(property_service, user_profile.anfitrion_id)
@@ -1013,13 +1025,13 @@ async def show_host_properties(property_service, anfitrion_id):
     """Muestra las propiedades del anfitrión."""
     typer.echo("\n📋 MIS PROPIEDADES")
     typer.echo("=" * 50)
-    
+
     result = await property_service.list_properties_by_host(anfitrion_id)
-    
+
     if result.get("success"):
         properties = result.get("properties", [])
         total = result.get("total", 0)
-        
+
         if total == 0:
             typer.echo("📝 No tienes propiedades registradas aún")
         else:
@@ -1033,7 +1045,7 @@ async def show_host_properties(property_service, anfitrion_id):
                 typer.echo()
     else:
         typer.echo(f"❌ Error: {result.get('error', 'Error desconocido')}")
-    
+
     typer.echo("Presiona Enter para continuar...")
     input()
 
@@ -1054,7 +1066,8 @@ def _display_options_table(items: list, key: str = 'nombre'):
     col2 = items[mid:]
 
     for i in range(max(len(col1), len(col2))):
-        left = f"{col1[i]['id']:2}. {col1[i][key]:<30}" if i < len(col1) else " " * 35
+        left = f"{col1[i]['id']:2}. {col1[i][key]:<30}" if i < len(
+            col1) else " " * 35
         right = f"{col2[i]['id']:2}. {col2[i][key]}" if i < len(col2) else ""
         typer.echo(f"   {left}  {right}")
 
@@ -1087,7 +1100,8 @@ async def create_property_interactive(property_service, anfitrion_id):
         else:
             typer.echo("   (No se pudieron cargar los tipos)")
 
-        tipo_propiedad_id = typer.prompt("🏠 ID del tipo de propiedad", type=int, default=1)
+        tipo_propiedad_id = typer.prompt(
+            "🏠 ID del tipo de propiedad", type=int, default=1)
 
         # Mostrar amenities disponibles
         typer.echo("\n🎯 AMENITIES DISPONIBLES (opcional):")
@@ -1097,10 +1111,12 @@ async def create_property_interactive(property_service, anfitrion_id):
         else:
             typer.echo("   (No se pudieron cargar los amenities)")
 
-        amenities_input = typer.prompt("Ingresa IDs separados por coma (ej: 1,2) o presiona Enter para omitir", default="")
+        amenities_input = typer.prompt(
+            "Ingresa IDs separados por coma (ej: 1,2) o presiona Enter para omitir", default="")
         amenity_ids = None
         if amenities_input:
-            amenity_ids = [int(x.strip()) for x in amenities_input.split(",") if x.strip()]
+            amenity_ids = [int(x.strip())
+                           for x in amenities_input.split(",") if x.strip()]
 
         # Mostrar servicios disponibles
         typer.echo("\n🛎️ SERVICIOS DISPONIBLES (opcional):")
@@ -1110,10 +1126,12 @@ async def create_property_interactive(property_service, anfitrion_id):
         else:
             typer.echo("   (No se pudieron cargar los servicios)")
 
-        servicios_input = typer.prompt("Ingresa IDs separados por coma (ej: 1,2) o presiona Enter para omitir", default="")
+        servicios_input = typer.prompt(
+            "Ingresa IDs separados por coma (ej: 1,2) o presiona Enter para omitir", default="")
         servicio_ids = None
         if servicios_input:
-            servicio_ids = [int(x.strip()) for x in servicios_input.split(",") if x.strip()]
+            servicio_ids = [int(x.strip())
+                            for x in servicios_input.split(",") if x.strip()]
 
         # Mostrar reglas de la casa disponibles
         typer.echo("\n📏 REGLAS DE LA PROPIEDAD (opcional):")
@@ -1123,55 +1141,130 @@ async def create_property_interactive(property_service, anfitrion_id):
         else:
             typer.echo("   (No se pudieron cargar las reglas)")
 
-        reglas_input = typer.prompt("Ingresa IDs separados por coma (ej: 1,2) o presiona Enter para omitir", default="")
+        reglas_input = typer.prompt(
+            "Ingresa IDs separados por coma (ej: 1,2) o presiona Enter para omitir", default="")
         regla_ids = None
         if reglas_input:
-            regla_ids = [int(x.strip()) for x in reglas_input.split(",") if x.strip()]
+            regla_ids = [int(x.strip())
+                         for x in reglas_input.split(",") if x.strip()]
 
         # Horarios de check-in/check-out
         typer.echo("\n🕐 HORARIOS DE CHECK-IN/CHECK-OUT (opcional)")
-        checkin_time = typer.prompt("🕐 Horario check-in (ej: 15:00 o presiona Enter)", default="")
-        checkout_time = typer.prompt("🕐 Horario check-out (ej: 11:00 o presiona Enter)", default="")
+        checkin_time = typer.prompt(
+            "🕐 Horario check-in (ej: 15:00 o presiona Enter)", default="")
+        checkout_time = typer.prompt(
+            "🕐 Horario check-out (ej: 11:00 o presiona Enter)", default="")
 
         # URLs de imágenes
         typer.echo("\n🖼️  IMÁGENES DE LA PROPIEDAD (opcional):")
-        typer.echo("Ingresa URLs de imágenes separados por coma (ej: http://imagen1.jpg,http://imagen2.jpg)")
+        typer.echo(
+            "Ingresa URLs de imágenes separados por coma (ej: http://imagen1.jpg,http://imagen2.jpg)")
         typer.echo("O presiona Enter para no agregar imágenes")
         imagenes_input = typer.prompt("🖼️  URLs de imágenes", default="")
         imagen_urls = None
         if imagenes_input:
-            imagen_urls = [url.strip() for url in imagenes_input.split(",") if url.strip()]
+            imagen_urls = [url.strip()
+                           for url in imagenes_input.split(",") if url.strip()]
 
-        typer.echo("\n🔄 Creando propiedad...")
-
-        result = await property_service.create_property(
-            nombre=nombre,
-            descripcion=descripcion,
-            capacidad=capacidad,
-            ciudad_id=ciudad_id,
-            anfitrion_id=anfitrion_id,
-            tipo_propiedad_id=tipo_propiedad_id,
-            horario_check_in=checkin_time if checkin_time else None,
-            horario_check_out=checkout_time if checkout_time else None,
-            imagenes=imagen_urls,
-            amenities=amenity_ids,
-            servicios=servicio_ids,
-            reglas=regla_ids,
-            generar_calendario=True,
-            dias_calendario=365
-        )
+        # Configuración del calendario
+        typer.echo("\n📅 ¿CUÁNTOS DÍAS DE DISPONIBILIDAD GENERAR?")
+        typer.echo("\n⚡ OPCIÓN RÁPIDA (Recomendada para empezar):")
+        typer.echo("  1. Solo 7 días   - 🚀 Creación instantánea (2-3 segundos)")
+        typer.echo("  2. Un mes (30)  - ⏱️  Rápido (5-8 segundos)")
+        typer.echo("\n🔋 OPCIONES AVANZADAS:")
+        typer.echo("  3. Tres meses (90) - 🕰️  Moderado (15-20 segundos)")
+        typer.echo("  4. Año completo (365) - 🐢 Lento (45-60 segundos)")
+        typer.echo("  5. Personalizado")
         
+        opcion = typer.prompt("📅 Elige una opción (1-5)", default="1", type=str)
+        
+        # Mapear opción a días
+        dias_map = {
+            "1": 7,
+            "2": 30, 
+            "3": 90,
+            "4": 365
+        }
+        
+        if opcion in dias_map:
+            dias_calendario = dias_map[opcion]
+        elif opcion == "5":
+            dias_calendario = typer.prompt("📅 ¿Cuántos días? (máximo 500)", default=30, type=int)
+            if dias_calendario > 500:
+                typer.echo("⚠️  Limitado a 500 días por rendimiento")
+                dias_calendario = 500
+        else:
+            typer.echo("⚠️  Opción inválida, usando 7 días por defecto")
+            dias_calendario = 7
+            
+        # Mostrar estimación de tiempo
+        tiempo_estimado = {
+            7: "2-3 segundos",
+            30: "5-8 segundos", 
+            90: "15-20 segundos",
+            365: "45-60 segundos"
+        }
+        tiempo = tiempo_estimado.get(dias_calendario, "Variable según la cantidad")
+        
+        typer.echo(f"\n🕰️  Tiempo estimado: {tiempo}")
+        confirmar = typer.prompt(f"🚀 ¿Crear propiedad con {dias_calendario} días? (s/n)", default="s")
+        
+        if confirmar.lower() not in ['s', 'si', 'yes', 'y']:
+            typer.echo("❌ Operación cancelada")
+            return
+
+        typer.echo(f"\n🚀 Iniciando creación de propiedad...")
+        typer.echo(f"🔄 Generando {dias_calendario} días de disponibilidad...")
+        typer.echo("⏳ Esto puede tomar unos momentos, por favor espera...\n")
+
+        # Importar utilidades de progreso
+        import asyncio
+        from utils.progress import with_progress
+
+        # Ejecutar creación con indicador de progreso
+        result = await with_progress(
+            property_service.create_property(
+                nombre=nombre,
+                descripcion=descripcion,
+                capacidad=capacidad,
+                ciudad_id=ciudad_id,
+                anfitrion_id=anfitrion_id,
+                tipo_propiedad_id=tipo_propiedad_id,
+                horario_check_in=checkin_time if checkin_time else None,
+                horario_check_out=checkout_time if checkout_time else None,
+                imagenes=imagen_urls,
+                amenities=amenity_ids,
+                servicios=servicio_ids,
+                reglas=regla_ids,
+                generar_calendario=True,
+                dias_calendario=dias_calendario
+            ),
+            message=f"Creando propiedad con {dias_calendario} días"
+        )
+
         if result.get("success"):
-            typer.echo(f"\n✅ {result.get('message')}")
+            typer.echo(f"\n🎉 {result.get('message')}")
             typer.echo(f"🆔 ID de la propiedad: {result.get('property_id')}")
+            
+            # Mostrar estadísticas de rendimiento si están disponibles
+            from utils.performance import perf_stats
+            stats = perf_stats.get_summary()
+            
+            if stats:
+                typer.echo("\n📊 ESTADÍSTICAS DE RENDIMIENTO:")
+                for operation, data in stats.items():
+                    if data['total_calls'] > 0:
+                        typer.echo(f"  • {operation}: {data['avg_time']:.2f}s")
+                        
+            typer.echo(f"\n🚀 ¡Tu propiedad '{nombre}' está lista con {dias_calendario} días de disponibilidad!")
         else:
             typer.echo(f"\n❌ Error: {result.get('error')}")
-    
+
     except ValueError as e:
         typer.echo(f"\n❌ Error en los datos ingresados: {e}")
     except Exception as e:
         typer.echo(f"\n❌ Error inesperado: {e}")
-    
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 
@@ -1180,12 +1273,12 @@ async def show_property_details(property_service):
     """Muestra los detalles de una propiedad."""
     typer.echo("\n📝 VER DETALLES DE PROPIEDAD")
     typer.echo("=" * 50)
-    
+
     try:
         propiedad_id = typer.prompt("🆔 ID de la propiedad", type=int)
-        
+
         result = await property_service.get_property(propiedad_id)
-        
+
         if result.get("success"):
             prop = result.get("property")
             typer.echo(f"\n🏠 {prop['nombre']}")
@@ -1194,29 +1287,29 @@ async def show_property_details(property_service):
             typer.echo(f"   👥 Capacidad: {prop['capacidad']} personas")
             typer.echo(f"   🏙️  Ciudad: {prop.get('ciudad', 'N/A')}")
             typer.echo(f"   🏠 Tipo: {prop.get('tipo_propiedad', 'N/A')}")
-            
+
             if prop.get('amenities'):
                 typer.echo("\n   ✨ Amenities:")
                 for amenity in prop['amenities']:
                     typer.echo(f"      - {amenity.get('nombre', 'N/A')}")
-            
+
             if prop.get('servicios'):
                 typer.echo("\n   🔧 Servicios:")
                 for servicio in prop['servicios']:
                     typer.echo(f"      - {servicio.get('nombre', 'N/A')}")
-            
+
             if prop.get('reglas'):
                 typer.echo("\n   📜 Reglas:")
                 for regla in prop['reglas']:
                     typer.echo(f"      - {regla.get('descripcion', 'N/A')}")
         else:
             typer.echo(f"\n❌ Error: {result.get('error')}")
-    
+
     except ValueError:
         typer.echo("\n❌ ID inválido")
     except Exception as e:
         typer.echo(f"\n❌ Error: {e}")
-    
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 
@@ -1225,10 +1318,10 @@ async def update_property_interactive(property_service, anfitrion_id):
     """Actualiza una propiedad de forma interactiva."""
     typer.echo("\n✏️  EDITAR PROPIEDAD")
     typer.echo("=" * 50)
-    
+
     try:
         propiedad_id = typer.prompt("🆔 ID de la propiedad a editar", type=int)
-        
+
         # Verificar que la propiedad pertenece al anfitrión
         prop_result = await property_service.get_property(propiedad_id)
         if not prop_result.get("success"):
@@ -1236,32 +1329,34 @@ async def update_property_interactive(property_service, anfitrion_id):
             typer.echo("\nPresiona Enter para continuar...")
             input()
             return
-        
+
         prop = prop_result.get("property")
         if prop.get('anfitrion_id') != anfitrion_id:
             typer.echo("❌ Esta propiedad no te pertenece")
             typer.echo("\nPresiona Enter para continuar...")
             input()
             return
-        
+
         typer.echo(f"\nEditando: {prop['nombre']}")
         typer.echo("(Presiona Enter para mantener el valor actual)\n")
-        
+
         nombre = typer.prompt(f"📝 Nuevo nombre [{prop['nombre']}]", default="")
-        descripcion = typer.prompt(f"📄 Nueva descripción [{prop.get('descripcion', 'N/A')}]", default="")
-        capacidad_input = typer.prompt(f"👥 Nueva capacidad [{prop['capacidad']}]", default="")
-        
+        descripcion = typer.prompt(
+            f"📄 Nueva descripción [{prop.get('descripcion', 'N/A')}]", default="")
+        capacidad_input = typer.prompt(
+            f"👥 Nueva capacidad [{prop['capacidad']}]", default="")
+
         capacidad = int(capacidad_input) if capacidad_input else None
-        
+
         typer.echo("\n🔄 Actualizando propiedad...")
-        
+
         result = await property_service.update_property(
             propiedad_id,
             nombre=nombre if nombre else None,
             descripcion=descripcion if descripcion else None,
             capacidad=capacidad
         )
-        
+
         if result.get("success"):
             typer.echo(f"\n✅ {result.get('message')}")
             updated_prop = result.get("property")
@@ -1269,12 +1364,12 @@ async def update_property_interactive(property_service, anfitrion_id):
             typer.echo(f"   Capacidad: {updated_prop['capacidad']} personas")
         else:
             typer.echo(f"\n❌ Error: {result.get('error')}")
-    
+
     except ValueError as e:
         typer.echo(f"\n❌ Error en los datos: {e}")
     except Exception as e:
         typer.echo(f"\n❌ Error: {e}")
-    
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 
@@ -1283,10 +1378,11 @@ async def delete_property_interactive(property_service, anfitrion_id):
     """Elimina una propiedad de forma interactiva."""
     typer.echo("\n🗑️  ELIMINAR PROPIEDAD")
     typer.echo("=" * 50)
-    
+
     try:
-        propiedad_id = typer.prompt("🆔 ID de la propiedad a eliminar", type=int)
-        
+        propiedad_id = typer.prompt(
+            "🆔 ID de la propiedad a eliminar", type=int)
+
         # Verificar que la propiedad pertenece al anfitrión
         prop_result = await property_service.get_property(propiedad_id)
         if not prop_result.get("success"):
@@ -1294,34 +1390,34 @@ async def delete_property_interactive(property_service, anfitrion_id):
             typer.echo("\nPresiona Enter para continuar...")
             input()
             return
-        
+
         prop = prop_result.get("property")
         if prop.get('anfitrion_id') != anfitrion_id:
             typer.echo("❌ Esta propiedad no te pertenece")
             typer.echo("\nPresiona Enter para continuar...")
             input()
             return
-        
+
         typer.echo(f"\n⚠️  Vas a eliminar: {prop['nombre']}")
         typer.echo("⚠️  Esta acción NO se puede deshacer")
-        
+
         if typer.confirm("\n¿Estás seguro de que deseas eliminar esta propiedad?"):
             typer.echo("\n🔄 Eliminando propiedad...")
-            
+
             result = await property_service.delete_property(propiedad_id)
-            
+
             if result.get("success"):
                 typer.echo(f"\n✅ {result.get('message')}")
             else:
                 typer.echo(f"\n❌ Error: {result.get('error')}")
         else:
             typer.echo("\n❌ Eliminación cancelada")
-    
+
     except ValueError:
         typer.echo("\n❌ ID inválido")
     except Exception as e:
         typer.echo(f"\n❌ Error: {e}")
-    
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 
@@ -1669,7 +1765,8 @@ async def handle_availability_management(user_profile):
             elif choice == 6:
                 break
             else:
-                typer.echo("❌ Opción inválida. Por favor selecciona entre 1 y 6.")
+                typer.echo(
+                    "❌ Opción inválida. Por favor selecciona entre 1 y 6.")
 
         except ValueError:
             typer.echo("❌ Por favor ingresa un número válido.")
@@ -1723,7 +1820,8 @@ async def handle_guest_reservations(reservation_service, user_profile):
             elif choice == 6:
                 break
             else:
-                typer.echo("❌ Opción inválida. Por favor selecciona entre 1 y 6.")
+                typer.echo(
+                    "❌ Opción inválida. Por favor selecciona entre 1 y 6.")
 
         except ValueError:
             typer.echo("❌ Por favor ingresa un número válido.")
@@ -1764,7 +1862,8 @@ async def handle_host_reservations(reservation_service, user_profile):
             elif choice == 5:
                 break
             else:
-                typer.echo("❌ Opción inválida. Por favor selecciona entre 1 y 5.")
+                typer.echo(
+                    "❌ Opción inválida. Por favor selecciona entre 1 y 5.")
 
         except ValueError:
             typer.echo("❌ Por favor ingresa un número válido.")
@@ -1773,7 +1872,8 @@ async def handle_host_reservations(reservation_service, user_profile):
             break
         except Exception as e:
             typer.echo(f"❌ Error inesperado: {str(e)}")
-            logger.error("Error en gestión de reservas de anfitrión", error=str(e))
+            logger.error(
+                "Error en gestión de reservas de anfitrión", error=str(e))
 
 
 # ===== FUNCIONES DE DISPONIBILIDAD =====
@@ -1837,8 +1937,10 @@ async def show_availability_calendar_interactive(reservation_service, anfitrion_
                 precio = f"${row['price_per_night']}" if row['price_per_night'] else "No configurado"
                 typer.echo(f"{fecha:<12} {estado:<12} {precio:<15}")
         else:
-            typer.echo(f"\n📅 No hay disponibilidad configurada para la propiedad {property_id}")
-            typer.echo("💡 Tip: Use el script setup_availability.py para configurar disponibilidad inicial")
+            typer.echo(
+                f"\n📅 No hay disponibilidad configurada para la propiedad {property_id}")
+            typer.echo(
+                "💡 Tip: Use el script setup_availability.py para configurar disponibilidad inicial")
 
     except Exception as e:
         typer.echo(f"❌ Error: {str(e)}")
@@ -1880,7 +1982,8 @@ async def block_property_dates_interactive(reservation_service, anfitrion_id):
             end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
 
             if end_date <= start_date:
-                typer.echo("❌ La fecha fin debe ser posterior a la fecha inicio")
+                typer.echo(
+                    "❌ La fecha fin debe ser posterior a la fecha inicio")
                 typer.echo("Presiona Enter para continuar...")
                 input()
                 return
@@ -1908,63 +2011,65 @@ async def unblock_property_dates_interactive(reservation_service, anfitrion_id):
     try:
         typer.echo("\n✅ HABILITAR FECHAS")
         typer.echo("=" * 50)
-        
+
         property_id = typer.prompt("🏠 ID de la propiedad", type=int)
-        
+
         # Validar propiedad del anfitrión
         from services.properties import PropertyService
         prop_service = PropertyService()
         properties_result = await prop_service.list_properties_by_host(anfitrion_id)
-        
+
         if not properties_result.get('success', False):
             typer.echo("❌ Error obteniendo propiedades del anfitrión")
             typer.echo("Presiona Enter para continuar...")
             input()
             return
-        
+
         if not any(p['id'] == property_id for p in properties_result.get('properties', [])):
             typer.echo("❌ No tienes permisos para gestionar esta propiedad")
             typer.echo("Presiona Enter para continuar...")
             input()
             return
-        
+
         start_date_str = typer.prompt("📅 Fecha inicio (YYYY-MM-DD)")
         end_date_str = typer.prompt("📅 Fecha fin (YYYY-MM-DD)")
-        
-        price_input = typer.prompt("💰 Precio por noche (Enter para usar $100 por defecto)", default="")
+
+        price_input = typer.prompt(
+            "💰 Precio por noche (Enter para usar $100 por defecto)", default="")
         price_per_night = None
         if price_input.strip():
             try:
                 price_per_night = float(price_input)
             except ValueError:
                 typer.echo("❌ Precio inválido, usando precio por defecto")
-        
+
         try:
             start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
             end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
-            
+
             if end_date <= start_date:
-                typer.echo("❌ La fecha fin debe ser posterior a la fecha inicio")
+                typer.echo(
+                    "❌ La fecha fin debe ser posterior a la fecha inicio")
                 typer.echo("Presiona Enter para continuar...")
                 input()
                 return
-            
+
             # Habilitar fechas
             await reservation_service._mark_dates_available(property_id, start_date, end_date, price_per_night)
-            
+
             num_days = (end_date - start_date).days
             price_display = f"${price_per_night}/noche" if price_per_night else "$100/noche (por defecto)"
             typer.echo(f"\n✅ {num_days} fechas habilitadas exitosamente")
             typer.echo(f"🏠 Propiedad: {property_id}")
             typer.echo(f"📅 Período: {start_date} a {end_date}")
             typer.echo(f"💰 Precio: {price_display}")
-            
+
         except ValueError:
             typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
-            
+
     except Exception as e:
         typer.echo(f"❌ Error: {str(e)}")
-    
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 
@@ -1974,31 +2079,32 @@ async def check_availability_interactive(reservation_service, anfitrion_id):
     try:
         typer.echo("\n🔍 VERIFICAR DISPONIBILIDAD")
         typer.echo("=" * 50)
-        
+
         property_id = typer.prompt("🏠 ID de la propiedad", type=int)
         start_date_str = typer.prompt("📅 Fecha inicio (YYYY-MM-DD)")
         end_date_str = typer.prompt("📅 Fecha fin (YYYY-MM-DD)")
-        
+
         try:
             start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
             end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
-            
+
             if end_date <= start_date:
-                typer.echo("❌ La fecha fin debe ser posterior a la fecha inicio")
+                typer.echo(
+                    "❌ La fecha fin debe ser posterior a la fecha inicio")
                 typer.echo("Presiona Enter para continuar...")
                 input()
                 return
-            
+
             # Verificar disponibilidad
             is_available = await reservation_service._check_availability(property_id, start_date, end_date)
-            
+
             num_days = (end_date - start_date).days
             typer.echo(f"\n📊 RESULTADO DE VERIFICACIÓN")
             typer.echo("-" * 30)
             typer.echo(f"🏠 Propiedad: {property_id}")
             typer.echo(f"📅 Período: {start_date} a {end_date}")
             typer.echo(f"📆 Días: {num_days}")
-            
+
             if is_available:
                 typer.echo(f"✅ Estado: DISPONIBLE")
                 # Obtener precio total si está disponible
@@ -2006,17 +2112,18 @@ async def check_availability_interactive(reservation_service, anfitrion_id):
                 total_price = await reservation_service._calculate_price_for_period(property_id, start_date, end_date)
                 if total_price and total_price > Decimal('0'):
                     typer.echo(f"💰 Precio total: ${total_price}")
-                    typer.echo(f"💰 Precio promedio por noche: ${total_price / num_days}")
+                    typer.echo(
+                        f"💰 Precio promedio por noche: ${total_price / num_days}")
             else:
                 typer.echo(f"❌ Estado: NO DISPONIBLE")
                 typer.echo("🚫 La propiedad no está disponible en esas fechas")
-            
+
         except ValueError:
             typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
-            
+
     except Exception as e:
         typer.echo(f"❌ Error: {str(e)}")
-    
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 
@@ -2024,11 +2131,11 @@ async def check_availability_interactive(reservation_service, anfitrion_id):
 async def show_availability_stats_interactive(reservation_service, anfitrion_id):
     """Muestra estadísticas de disponibilidad para las propiedades del anfitrión."""
     from db.postgres import execute_query
-    
+
     try:
         typer.echo("\n📈 ESTADÍSTICAS DE DISPONIBILIDAD")
         typer.echo("=" * 50)
-        
+
         # Obtener estadísticas generales por propiedad
         query = """
             SELECT 
@@ -2047,34 +2154,42 @@ async def show_availability_stats_interactive(reservation_service, anfitrion_id)
             GROUP BY p.id, p.nombre
             ORDER BY p.id
         """
-        
+
         results = await execute_query(query, anfitrion_id)
-        
+
         if results:
-            typer.echo(f"📊 Resumen de disponibilidad para anfitrión {anfitrion_id}:")
+            typer.echo(
+                f"📊 Resumen de disponibilidad para anfitrión {anfitrion_id}:")
             typer.echo("-" * 80)
-            
+
             for row in results:
-                typer.echo(f"\n🏠 Propiedad: {row['nombre']} (ID: {row['propiedad_id']})")
-                typer.echo(f"   📅 Días configurados: {row['dias_configurados']}")
+                typer.echo(
+                    f"\n🏠 Propiedad: {row['nombre']} (ID: {row['propiedad_id']})")
+                typer.echo(
+                    f"   📅 Días configurados: {row['dias_configurados']}")
                 typer.echo(f"   ✅ Días disponibles: {row['dias_disponibles']}")
                 typer.echo(f"   ❌ Días bloqueados: {row['dias_bloqueados']}")
-                
+
                 if row['precio_promedio']:
-                    typer.echo(f"   💰 Precio promedio: ${row['precio_promedio']:.2f}/noche")
-                    typer.echo(f"   💰 Rango de precios: ${row['precio_minimo']:.2f} - ${row['precio_maximo']:.2f}")
-                
+                    typer.echo(
+                        f"   💰 Precio promedio: ${row['precio_promedio']:.2f}/noche")
+                    typer.echo(
+                        f"   💰 Rango de precios: ${row['precio_minimo']:.2f} - ${row['precio_maximo']:.2f}")
+
                 # Calcular proyección de ingresos (días disponibles * precio promedio)
                 if row['dias_disponibles'] and row['precio_promedio']:
-                    ingresos_potenciales = row['dias_disponibles'] * float(row['precio_promedio'])
-                    typer.echo(f"   💎 Ingresos potenciales: ${ingresos_potenciales:.2f}")
+                    ingresos_potenciales = row['dias_disponibles'] * \
+                        float(row['precio_promedio'])
+                    typer.echo(
+                        f"   💎 Ingresos potenciales: ${ingresos_potenciales:.2f}")
         else:
             typer.echo("📅 No hay datos de disponibilidad configurados")
-            typer.echo("💡 Tip: Use el script setup_availability.py para configurar disponibilidad inicial")
-        
+            typer.echo(
+                "💡 Tip: Use el script setup_availability.py para configurar disponibilidad inicial")
+
     except Exception as e:
         typer.echo(f"❌ Error: {str(e)}")
-    
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 
@@ -2094,38 +2209,40 @@ async def create_reservation_interactive(reservation_service, huesped_id):
     try:
         typer.echo("\n➕ CREAR NUEVA RESERVA")
         typer.echo("=" * 50)
-        
+
         property_id = typer.prompt("🏠 ID de la propiedad", type=int)
-        
+
         typer.echo("\n📅 Fechas (formato: YYYY-MM-DD)")
         check_in_str = typer.prompt("   Fecha de entrada")
         check_out_str = typer.prompt("   Fecha de salida")
-        
+
         guests = typer.prompt("👥 Número de huéspedes [1]", default=1, type=int)
-        special_requests = typer.prompt("💬 Comentarios especiales (Enter para omitir) [", default="")
-        
+        special_requests = typer.prompt(
+            "💬 Comentarios especiales (Enter para omitir) [", default="")
+
         try:
             check_in = datetime.strptime(check_in_str, "%Y-%m-%d").date()
             check_out = datetime.strptime(check_out_str, "%Y-%m-%d").date()
-            
+
             if check_out <= check_in:
-                typer.echo("❌ La fecha de salida debe ser posterior a la fecha de entrada")
+                typer.echo(
+                    "❌ La fecha de salida debe ser posterior a la fecha de entrada")
                 typer.echo("Presiona Enter para continuar...")
                 input()
                 return
-            
+
             typer.echo("\n🔄 Creando reserva...")
-            
+
             # Crear la reserva usando el servicio
             result = await reservation_service.create_reservation(
                 propiedad_id=property_id,
                 huesped_id=huesped_id,
                 check_in=check_in,
                 check_out=check_out,
-                guests=guests,
-                special_requests=special_requests or None
+                num_huespedes=guests,
+                comentarios=special_requests or None
             )
-            
+
             if result.get('success'):
                 reservation = result.get('reservation', {})
                 reserva_id = reservation.get('id')
@@ -2141,13 +2258,13 @@ async def create_reservation_interactive(reservation_service, huesped_id):
             else:
                 error_msg = result.get('error', 'Error desconocido')
                 typer.echo(f"❌ Error: {error_msg}")
-                
+
         except ValueError:
             typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
-            
+
     except Exception as e:
         typer.echo(f"❌ Error inesperado: {str(e)}")
-    
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 
@@ -2173,31 +2290,32 @@ async def check_property_availability_interactive(reservation_service):
     try:
         typer.echo("\n🔍 VERIFICAR DISPONIBILIDAD")
         typer.echo("=" * 50)
-        
+
         property_id = typer.prompt("🏠 ID de la propiedad", type=int)
         start_date_str = typer.prompt("📅 Fecha inicio (YYYY-MM-DD)")
         end_date_str = typer.prompt("📅 Fecha fin (YYYY-MM-DD)")
-        
+
         try:
             start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
             end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
-            
+
             if end_date <= start_date:
-                typer.echo("❌ La fecha fin debe ser posterior a la fecha inicio")
+                typer.echo(
+                    "❌ La fecha fin debe ser posterior a la fecha inicio")
                 typer.echo("Presiona Enter para continuar...")
                 input()
                 return
-            
+
             # Verificar disponibilidad
             is_available = await reservation_service._check_availability(property_id, start_date, end_date)
-            
+
             num_days = (end_date - start_date).days
             typer.echo(f"\n📊 RESULTADO DE VERIFICACIÓN")
             typer.echo("-" * 30)
             typer.echo(f"🏠 Propiedad: {property_id}")
             typer.echo(f"📅 Período: {start_date} a {end_date}")
             typer.echo(f"📆 Días: {num_days}")
-            
+
             if is_available:
                 typer.echo(f"✅ Estado: DISPONIBLE")
                 # Obtener precio total si está disponible
@@ -2205,17 +2323,18 @@ async def check_property_availability_interactive(reservation_service):
                 total_price = await reservation_service._calculate_price_for_period(property_id, start_date, end_date)
                 if total_price and total_price > Decimal('0'):
                     typer.echo(f"💰 Precio total: ${total_price}")
-                    typer.echo(f"💰 Precio promedio por noche: ${total_price / num_days}")
+                    typer.echo(
+                        f"💰 Precio promedio por noche: ${total_price / num_days}")
             else:
                 typer.echo(f"❌ Estado: NO DISPONIBLE")
                 typer.echo("🚫 La propiedad no está disponible en esas fechas")
-            
+
         except ValueError:
             typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
-            
+
     except Exception as e:
         typer.echo(f"❌ Error: {str(e)}")
-    
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 
@@ -2703,8 +2822,9 @@ async def create_reservation_interactive(reservation_service, huesped_id):
             )
 
             if result.get('success'):
-                reserva_id = result.get('reserva_id')
-                total_price = result.get('total_price')
+                reservation = result.get('reservation', {})
+                reserva_id = reservation.get('id')
+                total_price = reservation.get('precio_total')
                 typer.echo(f"\n✅ Reserva creada exitosamente!")
                 typer.echo(f"🆔 ID de reserva: {reserva_id}")
                 typer.echo(f"🏠 Propiedad: {property_id}")
@@ -3187,10 +3307,10 @@ async def handle_review_management(user_profile):
     """Maneja la gestión de reseñas para huéspedes."""
     try:
         typer.echo(f"\n🔄 Inicializando servicio de reseñas...")
-        
+
         from services.reviews import ReviewService
         review_service = ReviewService()
-        
+
         typer.echo("✅ Servicio de reseñas inicializado")
 
         while True:
@@ -3199,7 +3319,7 @@ async def handle_review_management(user_profile):
             typer.echo(f"👤 Usuario: {user_profile.email}")
             typer.echo("-" * 50)
             typer.echo("1. ✍️  Crear nueva reseña")
-            typer.echo("2. 📋 Ver mis reseñas") 
+            typer.echo("2. 📋 Ver mis reseñas")
             typer.echo("3. ⏳ Ver reseñas pendientes")
             typer.echo("4. 📊 Estadísticas de mis reseñas")
             typer.echo("5. ⬅️  Volver al menú principal")
@@ -3224,7 +3344,8 @@ async def handle_review_management(user_profile):
                     typer.echo("⬅️ Volviendo al menú principal...")
                     break
                 else:
-                    typer.echo("❌ Opción inválida. Por favor selecciona entre 1 y 5.")
+                    typer.echo(
+                        "❌ Opción inválida. Por favor selecciona entre 1 y 5.")
 
             except ValueError:
                 typer.echo("❌ Por favor ingresa un número válido.")
@@ -3238,17 +3359,17 @@ async def handle_review_management(user_profile):
     except Exception as e:
         typer.echo(f"❌ Error inicializando gestión de reseñas: {str(e)}")
         logger.error(f"Error en handle_review_management: {e}")
-        
+
         # Menú de respaldo
         typer.echo("\n📝 FUNCIONALIDAD DE RESEÑAS TEMPORALMENTE NO DISPONIBLE")
         typer.echo("=" * 60)
         typer.echo("❌ Hay un problema con el servicio de reseñas.")
         typer.echo("💡 Esto puede deberse a:")
         typer.echo("   • Problemas de conectividad con MongoDB")
-        typer.echo("   • Problemas de conectividad con Neo4j") 
+        typer.echo("   • Problemas de conectividad con Neo4j")
         typer.echo("   • Error en el servicio de reseñas")
         typer.echo("🔄 Por favor, intenta nuevamente más tarde.")
-        
+
         typer.echo("\nPresiona Enter para volver al menú principal...")
         input()
 
@@ -3258,10 +3379,10 @@ async def create_review_simple(review_service, user_profile):
     try:
         typer.echo("\n✍️ CREAR NUEVA RESEÑA")
         typer.echo("=" * 40)
-        
+
         # Obtener reservas completadas del usuario
         from db.postgres import execute_query
-        
+
         query = """
         SELECT r.id, r.propiedad_id, p.nombre as propiedad_nombre,
                r.fecha_inicio, r.fecha_fin, r.estado,
@@ -3277,46 +3398,51 @@ async def create_review_simple(review_service, user_profile):
         ORDER BY r.fecha_fin DESC
         LIMIT 10
         """
-        
+
         reservas = await execute_query(query, user_profile.user_id)
-        
+
         if not reservas:
             typer.echo("📭 No tienes reservas completadas sin reseñar")
             typer.echo("💡 Completa una estancia para poder dejar una reseña")
         else:
             typer.echo(f"📋 Reservas disponibles para reseñar:")
             typer.echo("-" * 60)
-            
+
             for i, reserva in enumerate(reservas, 1):
                 typer.echo(f"{i}. Propiedad: {reserva['propiedad_nombre']}")
                 typer.echo(f"   Anfitrión: {reserva['anfitrion_nombre']}")
-                typer.echo(f"   Estancia: {reserva['fecha_inicio']} - {reserva['fecha_fin']}")
+                typer.echo(
+                    f"   Estancia: {reserva['fecha_inicio']} - {reserva['fecha_fin']}")
                 typer.echo()
-            
+
             try:
-                choice = typer.prompt(f"Selecciona una reserva para reseñar (1-{len(reservas)})", type=int)
-                
+                choice = typer.prompt(
+                    f"Selecciona una reserva para reseñar (1-{len(reservas)})", type=int)
+
                 if 1 <= choice <= len(reservas):
                     reserva = reservas[choice - 1]
-                    
+
                     # Solicitar calificación y comentario
                     puntaje = typer.prompt("⭐ Calificación (1-5)", type=int)
-                    
+
                     if not (1 <= puntaje <= 5):
                         typer.echo("❌ La calificación debe estar entre 1 y 5")
                         return
-                    
-                    comentario = typer.prompt("💬 Comentario (opcional)", default="")
-                    
+
+                    comentario = typer.prompt(
+                        "💬 Comentario (opcional)", default="")
+
                     # Mostrar resumen
                     typer.echo(f"\n📋 RESUMEN DE LA RESEÑA:")
                     typer.echo(f"🏠 Propiedad: {reserva['propiedad_nombre']}")
                     typer.echo(f"👤 Anfitrión: {reserva['anfitrion_nombre']}")
                     typer.echo(f"⭐ Calificación: {puntaje}/5")
-                    typer.echo(f"💬 Comentario: {comentario or 'Sin comentario'}")
-                    
-                    confirmar = typer.prompt("\n¿Confirmar reseña? (s/n)", default="s")
-                    
+                    typer.echo(
+                        f"💬 Comentario: {comentario or 'Sin comentario'}")
+
+                    confirmar = typer.prompt(
+                        "\n¿Confirmar reseña? (s/n)", default="s")
+
                     if confirmar.lower() == 's':
                         typer.echo("🔄 Guardando reseña...")
                         typer.echo("✅ Reseña creada exitosamente")
@@ -3326,10 +3452,10 @@ async def create_review_simple(review_service, user_profile):
                         typer.echo("❌ Reseña cancelada")
                 else:
                     typer.echo("❌ Opción inválida")
-                    
+
             except ValueError:
                 typer.echo("❌ Por favor ingresa un número válido")
-        
+
     except Exception as e:
         typer.echo(f"❌ Error creando reseña: {str(e)}")
 
@@ -3342,10 +3468,10 @@ async def show_my_reviews_simple(review_service, user_profile):
     try:
         typer.echo("\n📋 MIS RESEÑAS")
         typer.echo("=" * 40)
-        
+
         # Simular consulta de reseñas
         from db.postgres import execute_query
-        
+
         query = """
         SELECT r.id, r.puntaje, r.comentario, r.fecha_creacion,
                p.nombre as propiedad_nombre,
@@ -3358,16 +3484,16 @@ async def show_my_reviews_simple(review_service, user_profile):
         ORDER BY r.fecha_creacion DESC
         LIMIT 10
         """
-        
+
         reseñas = await execute_query(query, user_profile.user_id)
-        
+
         if not reseñas:
             typer.echo("📭 No tienes reseñas creadas aún")
             typer.echo("💡 Completa una estancia y crea tu primera reseña")
         else:
             typer.echo(f"📊 Total de reseñas: {len(reseñas)}")
             typer.echo("-" * 50)
-            
+
             for i, reseña in enumerate(reseñas, 1):
                 fecha = reseña['fecha_creacion'].strftime("%Y-%m-%d")
                 typer.echo(f"{i}. {reseña['propiedad_nombre']} - {fecha}")
@@ -3376,7 +3502,7 @@ async def show_my_reviews_simple(review_service, user_profile):
                 if reseña['comentario']:
                     typer.echo(f"   💬 \"{reseña['comentario']}\"")
                 typer.echo()
-        
+
     except Exception as e:
         typer.echo(f"❌ Error mostrando reseñas: {str(e)}")
 
@@ -3389,9 +3515,9 @@ async def show_pending_reviews_simple(review_service, user_profile):
     try:
         typer.echo("\n⏳ RESEÑAS PENDIENTES")
         typer.echo("=" * 40)
-        
+
         from db.postgres import execute_query
-        
+
         query = """
         SELECT r.id, p.nombre as propiedad_nombre,
                r.fecha_inicio, r.fecha_fin,
@@ -3406,24 +3532,24 @@ async def show_pending_reviews_simple(review_service, user_profile):
         )
         ORDER BY r.fecha_fin DESC
         """
-        
+
         pendientes = await execute_query(query, user_profile.user_id)
-        
+
         if not pendientes:
             typer.echo("✅ No tienes reseñas pendientes")
             typer.echo("🎉 Todas tus estancias completadas han sido reseñadas")
         else:
             typer.echo(f"⚠️ Tienes {len(pendientes)} reseñas pendientes:")
             typer.echo("-" * 50)
-            
+
             for i, reserva in enumerate(pendientes, 1):
                 typer.echo(f"{i}. {reserva['propiedad_nombre']}")
                 typer.echo(f"   Anfitrión: {reserva['anfitrion_nombre']}")
                 typer.echo(f"   Completada: {reserva['fecha_fin']}")
                 typer.echo()
-            
+
             typer.echo("💡 Ve a 'Crear nueva reseña' para completarlas")
-        
+
     except Exception as e:
         typer.echo(f"❌ Error mostrando pendientes: {str(e)}")
 
@@ -3436,9 +3562,9 @@ async def show_review_stats_simple(review_service, user_profile):
     try:
         typer.echo("\n📊 ESTADÍSTICAS DE MIS RESEÑAS")
         typer.echo("=" * 45)
-        
+
         from db.postgres import execute_query
-        
+
         # Estadísticas básicas
         query = """
         SELECT 
@@ -3450,16 +3576,17 @@ async def show_review_stats_simple(review_service, user_profile):
         JOIN reserva res ON r.reserva_id = res.id
         WHERE res.huesped_id = $1
         """
-        
+
         stats = await execute_query(query, user_profile.user_id)
-        
+
         if stats and stats[0]['total_reseñas'] > 0:
             stat = stats[0]
             typer.echo(f"📝 Total de reseñas: {stat['total_reseñas']}")
-            typer.echo(f"⭐ Promedio de calificación: {stat['promedio_puntaje']:.1f}/5")
+            typer.echo(
+                f"⭐ Promedio de calificación: {stat['promedio_puntaje']:.1f}/5")
             typer.echo(f"📈 Calificación más alta: {stat['max_puntaje']}/5")
             typer.echo(f"📉 Calificación más baja: {stat['min_puntaje']}/5")
-            
+
             # Distribución por puntaje
             query_dist = """
             SELECT puntaje, COUNT(*) as cantidad
@@ -3469,18 +3596,19 @@ async def show_review_stats_simple(review_service, user_profile):
             GROUP BY puntaje
             ORDER BY puntaje DESC
             """
-            
+
             distribucion = await execute_query(query_dist, user_profile.user_id)
-            
+
             typer.echo(f"\n📊 Distribución de calificaciones:")
             for dist in distribucion:
                 stars = "⭐" * dist['puntaje']
-                typer.echo(f"   {stars} ({dist['puntaje']}): {dist['cantidad']} reseñas")
-                
+                typer.echo(
+                    f"   {stars} ({dist['puntaje']}): {dist['cantidad']} reseñas")
+
         else:
             typer.echo("📭 No tienes reseñas para generar estadísticas")
             typer.echo("💡 Crea tu primera reseña para ver estadísticas")
-        
+
     except Exception as e:
         typer.echo(f"❌ Error mostrando estadísticas: {str(e)}")
 
@@ -3796,63 +3924,76 @@ async def show_review_stats(review_service, user_profile):
 
 async def test_case_3_property_search():
     """
-    Caso de uso 3: Búsqueda de propiedades usando Cassandra.
+    Caso de uso 3: Búsqueda de propiedades por ciudad con capacidad ≥3 y WiFi usando Cassandra.
     """
     try:
-        typer.echo("\n🏠 CASO DE USO 3: BÚSQUEDA DE PROPIEDADES (CASSANDRA)")
-        typer.echo("=" * 70)
+        typer.echo("\n🏠 CASO DE USO 3: BÚSQUEDA DE PROPIEDADES POR CIUDAD (CASSANDRA)")
+        typer.echo("=" * 75)
+
+        # Solicitar ciudad ID al usuario
+        typer.echo("🌆 Por favor, ingresa el ID de la ciudad:")
+        typer.echo("💡 Ciudades disponibles: 1=Buenos Aires, 2=Madrid, 3=Barcelona, 4=Lima, 5=Ciudad de México")
         
-        # Usar los nuevos comandos de Cassandra que creamos
-        fecha_test = "2026-03-15"
+        ciudad_id_input = typer.prompt("🏙️ ID de la ciudad")
         
-        typer.echo("🔍 Probando búsqueda de propiedades disponibles...")
-        typer.echo(f"📅 Fecha de búsqueda: {fecha_test}")
-        
+        try:
+            ciudad_id = int(ciudad_id_input)
+        except ValueError:
+            typer.echo("❌ Error: El ID de la ciudad debe ser un número")
+            return
+
+        typer.echo(f"\n🔍 Buscando propiedades en ciudad {ciudad_id} con:")
+        typer.echo("   📏 Capacidad ≥ 3 huéspedes")
+        typer.echo("   📶 WiFi disponible")
+
         from services.reservations import ReservationService
         service = ReservationService()
-        
-        # Probar CU 4: Propiedades disponibles
-        from datetime import datetime
-        fecha = datetime.strptime(fecha_test, "%Y-%m-%d").date()
-        result = await service.get_propiedades_disponibles_fecha(fecha)
-        
+
+        # Usar la nueva función específica del CU3
+        result = await service.get_propiedades_ciudad_capacidad_wifi(
+            ciudad_id=ciudad_id,
+            min_capacidad=3,
+            wifi_required=True
+        )
+
         if result.get("success"):
             propiedades = result.get("propiedades", [])
-            
+
             typer.echo(f"\n✅ Búsqueda exitosa!")
             typer.echo(f"📊 Propiedades encontradas: {len(propiedades)}")
-            
+
             if propiedades:
-                typer.echo("\n🏠 PROPIEDADES DISPONIBLES:")
-                typer.echo("-" * 70)
+                typer.echo("\n🏠 PROPIEDADES CON CAPACIDAD ≥3 Y WIFI:")
+                typer.echo("-" * 75)
                 typer.echo(f"{'ID':<8} {'Ciudad':<15} {'Precio':<12} {'Capacidad':<12} {'WiFi'}")
-                typer.echo("-" * 70)
-                
-                for i, prop in enumerate(propiedades[:5], 1):  # Mostrar solo las primeras 5
+                typer.echo("-" * 75)
+
+                # Mostrar todas las propiedades que cumplen los criterios
+                for prop in propiedades:
                     prop_id = prop.get('propiedad_id', 'N/A')
                     ciudad = prop.get('ciudad_nombre', 'N/A')[:14]
                     precio = f"${prop.get('precio_noche', 0):.2f}"
                     capacidad = prop.get('capacidad_huespedes', 'N/A')
                     wifi = "Sí" if prop.get('wifi', False) else "No"
                     typer.echo(f"{prop_id:<8} {ciudad:<15} {precio:<12} {capacidad:<12} {wifi}")
-                
-                if len(propiedades) > 5:
-                    typer.echo(f"\n... y {len(propiedades) - 5} propiedades más")
-                    
-                typer.echo(f"\n💡 Estas propiedades están disponibles para reserva en {fecha_test}")
+
+                typer.echo(f"\n💡 Todas las propiedades mostradas tienen:")
+                typer.echo(f"   ✅ Capacidad para 3 o más huéspedes")
+                typer.echo(f"   ✅ WiFi disponible")
+                typer.echo(f"   🏙️ Ubicadas en la ciudad seleccionada")
             else:
-                typer.echo("📭 No hay propiedades disponibles para la fecha especificada")
+                typer.echo("📭 No hay propiedades que cumplan los criterios de búsqueda")
         else:
             typer.echo(f"❌ Error en la búsqueda: {result.get('error', 'Error desconocido')}")
-        
-        typer.echo("\n" + "="*70)
+
+        typer.echo("\n" + "="*75)
         typer.echo("✅ Caso de uso 3 completado")
-        
+
     except Exception as e:
         typer.echo(f"❌ Error en caso de uso 3: {str(e)}")
         logger.error("Error en caso de uso 3", error=str(e))
 
-    typer.echo("\n" + "="*70)
+    typer.echo("\n" + "="*75)
     typer.echo("Presiona Enter para continuar...")
     input()
 
@@ -3864,21 +4005,21 @@ async def test_case_7_guest_session():
     try:
         typer.echo("\n🔐 CASO DE USO 7: SESIÓN DE HUÉSPED (1 HORA)")
         typer.echo("=" * 70)
-        
+
         typer.echo("💡 Este caso de uso demuestra:")
         typer.echo("   • Creación de sesión con TTL de 1 hora")
         typer.echo("   • Auto-refresh de sesión durante actividad")
         typer.echo("   • Gestión automática de expiración")
-        
+
         # Simular autenticación de un huésped
         from services.auth import AuthService
         auth_service = AuthService()
-        
+
         typer.echo("\n🔄 Simulando autenticación de huésped...")
-        
+
         # Buscar un usuario huésped en la base de datos
         from db.postgres import execute_query
-        
+
         query = """
         SELECT u.id, u.email, u.rol, h.nombre as nombre_huesped
         FROM usuario u
@@ -3887,51 +4028,55 @@ async def test_case_7_guest_session():
         AND h.nombre IS NOT NULL
         LIMIT 1
         """
-        
+
         result = await execute_query(query)
-        
+
         if result:
             user_data = result[0]
             typer.echo(f"✅ Usuario encontrado: {user_data['email']}")
             typer.echo(f"👤 Nombre: {user_data['nombre_huesped']}")
             typer.echo(f"🎭 Rol: {user_data['rol']}")
-            
+
             # Simular creación de sesión
             from services.session import SessionManager
             session_manager = SessionManager()
-            
+
             typer.echo(f"\n🔄 Creando sesión con TTL de 1 hora...")
-            
+
             # En un caso real, esto se haría durante el login exitoso
             typer.echo("✅ Sesión creada exitosamente")
             typer.echo("⏰ TTL: 3600 segundos (1 hora)")
             typer.echo("🔄 Auto-refresh: Habilitado")
             typer.echo("💾 Almacenamiento: Redis")
-            
+
             typer.echo(f"\n📋 Funcionalidades disponibles para este huésped:")
             typer.echo("   • 📅 Gestionar reservas")
             typer.echo("   • ⭐ Crear y gestionar reseñas")
             typer.echo("   • 🔍 Buscar propiedades")
             typer.echo("   • 👤 Gestionar perfil")
-            
+
             typer.echo(f"\n🔒 Gestión automática de sesión:")
-            typer.echo("   • La sesión se extiende automáticamente con cada acción")
-            typer.echo("   • Después de 1 hora sin actividad, expira automáticamente")
-            typer.echo("   • Redis maneja la limpieza automática de sesiones expiradas")
-            
+            typer.echo(
+                "   • La sesión se extiende automáticamente con cada acción")
+            typer.echo(
+                "   • Después de 1 hora sin actividad, expira automáticamente")
+            typer.echo(
+                "   • Redis maneja la limpieza automática de sesiones expiradas")
+
         else:
-            typer.echo("⚠️ No se encontraron usuarios huéspedes en la base de datos")
+            typer.echo(
+                "⚠️ No se encontraron usuarios huéspedes en la base de datos")
             typer.echo("💡 Creando ejemplo conceptual...")
-            
+
             typer.echo(f"\n📋 EJEMPLO: Sesión de huésped guest@example.com")
             typer.echo("✅ Autenticación exitosa")
             typer.echo("⏰ Sesión creada con TTL: 1 hora")
             typer.echo("🔑 Token JWT generado")
             typer.echo("💾 Sesión almacenada en Redis")
-        
+
         typer.echo("\n" + "="*70)
         typer.echo("✅ Caso de uso 7 completado")
-        
+
     except Exception as e:
         typer.echo(f"❌ Error en caso de uso 7: {str(e)}")
         logger.error("Error en caso de uso 7", error=str(e))
@@ -3942,71 +4087,75 @@ async def test_case_7_guest_session():
 
 
 async def test_case_1_ocupacion_ciudad():
-    """Caso de uso 1: Tasa de ocupación por ciudad."""
+    """Caso de uso 1: Tasa de ocupación por ciudad en un rango de fechas."""
     try:
         typer.echo("\n🏙️ CASO DE USO 1: TASA DE OCUPACIÓN POR CIUDAD")
         typer.echo("=" * 70)
-        
+        typer.echo("📊 Calculando tasa de ocupación en un RANGO DE FECHAS")
+        typer.echo("-" * 50)
+
         ciudad_id = typer.prompt("🏙️ ID de la ciudad", type=int)
-        fecha_str = typer.prompt("📅 Fecha (YYYY-MM-DD)")
-        
-        # Validar fecha
+        fecha_inicio_str = typer.prompt("📅 Fecha INICIO (YYYY-MM-DD)")
+        fecha_fin_str = typer.prompt("📅 Fecha FIN (YYYY-MM-DD)")
+
+        # Validar fechas
         try:
-            fecha = datetime.strptime(fecha_str, "%Y-%m-%d").date()
+            fecha_inicio = datetime.strptime(fecha_inicio_str, "%Y-%m-%d").date()
+            fecha_fin = datetime.strptime(fecha_fin_str, "%Y-%m-%d").date()
+            
+            if fecha_inicio > fecha_fin:
+                typer.echo("❌ La fecha de inicio debe ser anterior a la fecha de fin")
+                return
+                
         except ValueError:
             typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
             return
-            
-        typer.echo(f"\n🔄 Consultando ocupación de ciudad {ciudad_id} para {fecha_str}...")
-        
-        # Consultar datos de Cassandra
+
+        typer.echo(
+            f"\n🔄 Consultando ocupación de ciudad {ciudad_id} desde {fecha_inicio_str} hasta {fecha_fin_str}...")
+
+        # Consultar datos de Cassandra para el rango de fechas
         from db.cassandra import find_documents
-        
+
+        # Buscar datos en el rango de fechas
         filter_doc = {
             "ciudad_id": ciudad_id,
-            "fecha": fecha_str
+            "fecha": {"$gte": fecha_inicio_str, "$lte": fecha_fin_str}
         }
-        
-        results = await find_documents("ocupacion_por_ciudad", filter_doc, limit=1)
-        
+
+        results = await find_documents("ocupacion_por_ciudad", filter_doc, limit=100)
+
         if results:
-            data = results[0]
-            noches_ocupadas = data.get('noches_ocupadas', 0)
-            noches_disponibles = data.get('noches_disponibles', 0)
-            total_noches = noches_ocupadas + noches_disponibles
+            total_noches_ocupadas = 0
+            total_noches_disponibles = 0
+            dias_con_datos = len(results)
             
+            for data in results:
+                total_noches_ocupadas += data.get('noches_ocupadas', 0)
+                total_noches_disponibles += data.get('noches_disponibles', 0)
+            
+            total_noches = total_noches_ocupadas + total_noches_disponibles
+
             if total_noches > 0:
-                tasa_ocupacion = (noches_ocupadas / total_noches) * 100
-                
-                typer.echo(f"\n📊 RESULTADOS PARA CIUDAD {ciudad_id}:")
-                typer.echo("=" * 50)
-                typer.echo(f"📅 Fecha: {fecha_str}")
-                typer.echo(f"🏠 Noches ocupadas: {noches_ocupadas}")
-                typer.echo(f"🏨 Noches disponibles: {noches_disponibles}")
-                typer.echo(f"🔢 Total de noches: {total_noches}")
-                typer.echo(f"📈 Tasa de ocupación: {tasa_ocupacion:.1f}%")
-                
-                # Indicador visual de la ocupación
-                if tasa_ocupacion >= 80:
-                    typer.echo("🔥 Estado: ALTA OCUPACIÓN")
-                elif tasa_ocupacion >= 50:
-                    typer.echo("🟡 Estado: OCUPACIÓN MEDIA")
-                elif tasa_ocupacion >= 20:
-                    typer.echo("🟢 Estado: OCUPACIÓN BAJA")
-                else:
-                    typer.echo("⚪ Estado: MUY BAJA OCUPACIÓN")
+                tasa_ocupacion = (total_noches_ocupadas / total_noches) * 100
+
+                typer.echo(f"\n✅ RESULTADOS PARA CIUDAD {ciudad_id}")
+                typer.echo(f"📅 Período: {fecha_inicio_str} a {fecha_fin_str}")
+                typer.echo(f"📊 Días con datos: {dias_con_datos}")
+                typer.echo(f"🏠 Total noches ocupadas: {total_noches_ocupadas}")
+                typer.echo(f"🏠 Total noches disponibles: {total_noches_disponibles}")
+                typer.echo(f"📈 TASA DE OCUPACIÓN: {tasa_ocupacion:.2f}%")
             else:
-                typer.echo(f"📭 No hay datos de propiedades para ciudad {ciudad_id} en {fecha_str}")
+                typer.echo(f"⚠️ No hay datos de capacidad para ciudad {ciudad_id}")
         else:
-            typer.echo(f"📭 No se encontraron datos de ocupación para ciudad {ciudad_id} en {fecha_str}")
+            typer.echo(
+                f"📭 No se encontraron datos de ocupación para ciudad {ciudad_id} en el rango {fecha_inicio_str} - {fecha_fin_str}")
             typer.echo("💡 Esto puede significar que:")
             typer.echo("   • No hay propiedades registradas en esta ciudad")
-            typer.echo("   • No hay datos para esta fecha específica")
-            typer.echo("   • La ciudad necesita tener actividad de reservas")
-        
+            typer.echo("   • No hay datos para este rango de fechas")
         typer.echo("\n" + "="*70)
         typer.echo("✅ Caso de uso 1 completado")
-        
+
     except Exception as e:
         typer.echo(f"❌ Error en caso de uso 1: {str(e)}")
         logger.error("Error en caso de uso 1", error=str(e))
@@ -4023,20 +4172,21 @@ async def handle_test_cases_menu():
         typer.echo("=" * 60)
         typer.echo("💡 Prueba funcionalidades sin necesidad de login")
         typer.echo("-" * 60)
-        typer.echo("1. 🏙️ Caso 1: Tasa de ocupación por ciudad (Cassandra)")
+        typer.echo("1. 🏙️ Caso 1: Tasa de ocupación por ciudad (RANGO DE FECHAS - Cassandra)")
         typer.echo("2. 📊 Caso 2: Promedio de rating por anfitrión (MongoDB)")
         typer.echo("3. 🏠 Caso 3: Búsqueda de propiedades (Cassandra)")
         typer.echo("4. 🏠 Caso 4: Propiedades disponibles por fecha (Cassandra)")
         typer.echo("5. 🏙️ Caso 5: Reservas por ciudad y fecha (Cassandra)")
         typer.echo("6. 🏡 Caso 6: Reservas por host y fecha (Cassandra)")
         typer.echo("7. 🔐 Caso 7: Sesión de un huésped (1h)")
-        typer.echo("9. 🔗 Caso 9: Integración completa de disponibilidad")
+        typer.echo("9. 👥 Caso 9: Usuarios recurrentes por ciudad (Neo4j)")
         typer.echo(
             "10. 🏘️  Caso 10: Comunidades host-huésped (>=3 interacciones)")
         typer.echo("0. ⬅️  Volver al menú principal")
 
         try:
-            choice = typer.prompt("Selecciona una opción (1,2,3,4,5,6,7,9,10,0)", type=int)
+            choice = typer.prompt(
+                "Selecciona una opción (1,2,3,4,5,6,7,9,10,0)", type=int)
 
             if choice == 1:
                 await test_case_1_ocupacion_ciudad()
@@ -4053,7 +4203,7 @@ async def handle_test_cases_menu():
             elif choice == 7:
                 await test_case_7_guest_session()
             elif choice == 9:
-                await test_case_9_complete_availability_integration()
+                await test_case_9_usuarios_recurrentes()
             elif choice == 10:
                 await test_case_10_communities()
             elif choice == 0:
@@ -4075,13 +4225,13 @@ async def test_case_8_cassandra_integration():
         typer.echo("\n🏪 CASO DE USO 8: INTEGRACIÓN CASSANDRA")
         typer.echo("=" * 60)
         typer.echo("🔄 Probando sincronización PostgreSQL ↔ Cassandra")
-        
+
         # Importar dependencias
         from repositories.cassandra_reservation_repository import get_cassandra_reservation_repository
         from services.reservations import ReservationService
         from datetime import date, timedelta
         from decimal import Decimal
-        
+
         # Paso 1: Verificar conexión con Cassandra
         typer.echo("\n📡 Paso 1: Verificando conexión con Cassandra...")
         try:
@@ -4091,28 +4241,28 @@ async def test_case_8_cassandra_integration():
             typer.echo(f"   ❌ Error conectando con Cassandra: {e}")
             typer.echo("   💡 Verifica la configuración en tu archivo .env")
             return
-        
+
         # Paso 2: Probar operaciones básicas de repositorio
         typer.echo("\n🧪 Paso 2: Probando operaciones del repositorio...")
-        
+
         # Datos de prueba
         ciudad_id = 1
         propiedad_id = 101
         host_id = "550e8400-e29b-41d4-a716-446655440000"
-        huesped_id = "550e8400-e29b-41d4-a716-446655440001" 
+        huesped_id = "550e8400-e29b-41d4-a716-446655440001"
         reserva_id = "550e8400-e29b-41d4-a716-446655440002"
         fecha_inicio = date.today() + timedelta(days=7)
         fecha_fin = fecha_inicio + timedelta(days=3)
         monto = Decimal('150.00')
-        
+
         typer.echo(f"   📅 Fechas de prueba: {fecha_inicio} → {fecha_fin}")
-        
+
         # Test de creación
         typer.echo("   🏗️  Simulando creación de reserva...")
         loop = asyncio.get_event_loop()
         from concurrent.futures import ThreadPoolExecutor
         executor = ThreadPoolExecutor()
-        
+
         await loop.run_in_executor(
             executor,
             repo.sync_reservation_creation,
@@ -4120,7 +4270,7 @@ async def test_case_8_cassandra_integration():
             fecha_inicio, fecha_fin, monto
         )
         typer.echo("   ✅ Sincronización de creación completada")
-        
+
         # Test de cancelación
         typer.echo("   🗑️  Simulando cancelación de reserva...")
         await loop.run_in_executor(
@@ -4130,36 +4280,39 @@ async def test_case_8_cassandra_integration():
             fecha_inicio, fecha_fin
         )
         typer.echo("   ✅ Sincronización de cancelación completada")
-        
+
         # Paso 3: Probar servicio de reservas integrado
         typer.echo("\n🏢 Paso 3: Verificando integración en ReservationService...")
-        
+
         reservation_service = ReservationService()
         cassandra_repo = await reservation_service.cassandra_repo
-        
+
         if cassandra_repo:
             typer.echo("   ✅ ReservationService tiene repositorio Cassandra")
         else:
-            typer.echo("   ⚠️  ReservationService no pudo inicializar Cassandra")
-        
+            typer.echo(
+                "   ⚠️  ReservationService no pudo inicializar Cassandra")
+
         # Paso 4: Mostrar resumen de tablas
         typer.echo("\n📊 Paso 4: Resumen de sincronización:")
         typer.echo("   🏙️  ocupacion_por_ciudad → Métricas por ciudad y fecha")
-        typer.echo("   🏠 propiedades_disponibles_por_fecha → Disponibilidad diaria")
+        typer.echo(
+            "   🏠 propiedades_disponibles_por_fecha → Disponibilidad diaria")
         typer.echo("   📝 reservas_por_host_fecha → Reservas por anfitrión")
-        
+
         # Cerrar conexión
         await repo.close()
         await reservation_service.close()
-        
+
         typer.echo("\n🎉 INTEGRACIÓN CASSANDRA EXITOSA")
         typer.echo("   ✅ Repositorio funcionando")
         typer.echo("   ✅ Sincronización de creación/cancelación")
         typer.echo("   ✅ Integración con ReservationService")
-        
+
     except Exception as e:
         typer.echo(f"\n❌ Error durante el test: {str(e)}")
-        logger.error("Error en test_case_8_cassandra_integration", error=str(e))
+        logger.error(
+            "Error en test_case_8_cassandra_integration", error=str(e))
 
 
 async def test_case_2_rating_averages():
@@ -4289,130 +4442,6 @@ async def test_case_2_rating_averages():
     input()
 
 
-async def test_case_9_complete_availability_integration():
-    """Caso de uso 9: Prueba completa de integración de disponibilidad."""
-    try:
-        typer.echo("\n🔗 CASO DE USO 9: INTEGRACIÓN COMPLETA DE DISPONIBILIDAD")
-        typer.echo("=" * 70)
-        typer.echo("🔄 Probando sincronización PostgreSQL ↔ Cassandra")
-        
-        # Importar el script de prueba que creamos
-        import sys
-        import importlib.util
-        from pathlib import Path
-        
-        # Ejecutar script de prueba de integración
-        typer.echo("\n📋 Ejecutando pruebas de integración...")
-        
-        try:
-            # Simular el test de integración inline
-            from db.cassandra import (
-                get_cassandra_client,
-                cassandra_init_date,
-                cassandra_mark_unavailable,
-                cassandra_mark_available
-            )
-            from services.properties import PropertyService
-            from services.reservations import ReservationService
-            from datetime import date, timedelta
-            
-            # 1. Probar conexión
-            typer.echo("\n📡 1. Verificando conexión a Cassandra...")
-            cassandra_client = await get_cassandra_client()
-            if cassandra_client:
-                typer.echo("   ✅ Conexión a Cassandra exitosa")
-            else:
-                typer.echo("   ❌ Error: No se pudo conectar a Cassandra")
-                return
-            
-            # 2. Probar helpers básicos
-            typer.echo("\n🔧 2. Probando helpers de Cassandra...")
-            test_propiedad_id = 1
-            test_dates = [date.today() + timedelta(days=i) for i in range(3)]
-            
-            # Inicialización
-            try:
-                await cassandra_init_date(test_propiedad_id, test_dates)
-                typer.echo("   ✅ Inicialización de fechas")
-            except Exception as e:
-                typer.echo(f"   ❌ Error en inicialización: {e}")
-            
-            # Marcar no disponible
-            try:
-                await cassandra_mark_unavailable(test_propiedad_id, test_dates[:2])
-                typer.echo("   ✅ Marcar fechas no disponibles")
-            except Exception as e:
-                typer.echo(f"   ❌ Error al marcar no disponible: {e}")
-            
-            # Marcar disponible
-            try:
-                await cassandra_mark_available(test_propiedad_id, test_dates[:2])
-                typer.echo("   ✅ Marcar fechas disponibles")
-            except Exception as e:
-                typer.echo(f"   ❌ Error al marcar disponible: {e}")
-            
-            # 3. Verificar integración en servicios
-            typer.echo("\n🏢 3. Verificando integración en servicios...")
-            
-            property_service = PropertyService()
-            reservation_service = ReservationService()
-            
-            # Verificar métodos
-            if hasattr(property_service, '_generate_availability'):
-                typer.echo("   ✅ PropertyService._generate_availability integrado")
-            
-            if hasattr(reservation_service, '_mark_dates_unavailable'):
-                typer.echo("   ✅ ReservationService._mark_dates_unavailable integrado")
-            
-            if hasattr(reservation_service, '_mark_dates_available'):
-                typer.echo("   ✅ ReservationService._mark_dates_available integrado")
-            
-            # 4. Probar flujo completo (simulación)
-            typer.echo("\n🎯 4. Simulando flujo completo...")
-            
-            check_in = date.today() + timedelta(days=10)
-            check_out = date.today() + timedelta(days=13)
-            
-            typer.echo(f"   📅 Simulando reserva: {check_in} → {check_out}")
-            
-            # Simular marcado de no disponible
-            await reservation_service._mark_dates_unavailable(
-                test_propiedad_id, check_in, check_out, "Prueba de integración"
-            )
-            typer.echo("   ✅ Fechas marcadas como no disponibles (PostgreSQL + Cassandra)")
-            
-            # Simular liberación
-            from decimal import Decimal
-            await reservation_service._mark_dates_available(
-                test_propiedad_id, check_in, check_out, Decimal('120.00')
-            )
-            typer.echo("   ✅ Fechas liberadas (PostgreSQL + Cassandra)")
-            
-            # 5. Resumen
-            typer.echo("\n📊 5. Resumen de integración:")
-            typer.echo("   🏠 Creación de propiedades → Sync inicial con Cassandra")
-            typer.echo("   📝 Creación de reservas → Actualiza ocupación en ambas DBs")
-            typer.echo("   🗑️  Cancelación de reservas → Libera en ambas DBs")
-            typer.echo("   📈 Métricas en tiempo real → Disponibles en Cassandra")
-            
-            typer.echo("\n🎉 ¡INTEGRACIÓN COMPLETA FUNCIONAL!")
-            
-        except ImportError as e:
-            typer.echo(f"❌ Error de importación: {e}")
-            typer.echo("   Verifica que todas las dependencias estén instaladas.")
-        except Exception as e:
-            typer.echo(f"❌ Error en pruebas: {e}")
-            logger.error(f"Error en test de integración: {e}")
-    
-    except Exception as e:
-        typer.echo(f"❌ Error ejecutando pruebas de integración: {e}")
-        logger.error(f"Error en test_case_9: {e}")
-
-    typer.echo("\n" + "="*70)
-    typer.echo("Presiona Enter para continuar...")
-    input()
-
-
 async def test_case_10_communities():
     """Caso de uso 10: Mostrar comunidades host-huésped con >=3 interacciones."""
     try:
@@ -4512,14 +4541,14 @@ async def handle_cassandra_menu(user_profile):
             typer.echo(f"\n🗃️ CASOS DE USO CASSANDRA")
             typer.echo("=" * 50)
             typer.echo("1. 🏠 CU 4: Propiedades disponibles por fecha")
-            typer.echo("2. 🏙️ CU 5: Reservas por ciudad y fecha")  
+            typer.echo("2. 🏙️ CU 5: Reservas por ciudad y fecha")
             typer.echo("3. 🏡 CU 6: Reservas por host y fecha")
             typer.echo("4. 🔍 Verificar disponibilidad específica")
             typer.echo("5. 🧪 Probar todos los casos de uso")
             typer.echo("6. ⬅️  Volver al menú principal")
-            
+
             choice = typer.prompt("Selecciona una opción (1-6)", type=int)
-            
+
             if choice == 1:
                 await handle_cu4_propiedades_disponibles()
             elif choice == 2:
@@ -4534,7 +4563,7 @@ async def handle_cassandra_menu(user_profile):
                 break
             else:
                 typer.echo("❌ Opción inválida. Selecciona entre 1 y 6.")
-                
+
         except ValueError:
             typer.echo("❌ Por favor ingresa un número válido.")
         except Exception as e:
@@ -4546,50 +4575,55 @@ async def handle_cu4_propiedades_disponibles():
     try:
         typer.echo("\n🏠 CU 4: PROPIEDADES DISPONIBLES POR FECHA")
         typer.echo("=" * 60)
-        
+
         fecha_str = typer.prompt("📅 Fecha (YYYY-MM-DD)")
-        
+
         # Validar fecha
         try:
             fecha = datetime.strptime(fecha_str, "%Y-%m-%d").date()
         except ValueError:
             typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
             return
-            
+
         from services.reservations import ReservationService
         service = ReservationService()
-        
+
         typer.echo(f"\n🔄 Buscando propiedades disponibles para {fecha_str}...")
         result = await service.get_propiedades_disponibles_fecha(fecha)
-        
+
         if result.get("success"):
             propiedades = result.get("propiedades", [])
-            
-            typer.echo(f"\n📊 Resultados: {len(propiedades)} propiedades encontradas")
-            
+
+            typer.echo(
+                f"\n📊 Resultados: {len(propiedades)} propiedades encontradas")
+
             if propiedades:
                 typer.echo("\n" + "-" * 80)
-                typer.echo(f"{'ID':<8} {'Ciudad':<20} {'Precio/noche':<15} {'Capacidad':<12} {'WiFi':<6}")
+                typer.echo(
+                    f"{'ID':<8} {'Ciudad':<20} {'Precio/noche':<15} {'Capacidad':<12} {'WiFi':<6}")
                 typer.echo("-" * 80)
-                
+
                 for prop in propiedades[:15]:  # Mostrar solo las primeras 15
                     prop_id = prop.get('propiedad_id', 'N/A')
                     ciudad = prop.get('ciudad_nombre', 'N/A')[:19]
                     precio = f"${prop.get('precio_noche', 0):.2f}"
                     capacidad = prop.get('capacidad_huespedes', 'N/A')
                     wifi = "Sí" if prop.get('wifi', False) else "No"
-                    typer.echo(f"{prop_id:<8} {ciudad:<20} {precio:<15} {capacidad:<12} {wifi:<6}")
-                
+                    typer.echo(
+                        f"{prop_id:<8} {ciudad:<20} {precio:<15} {capacidad:<12} {wifi:<6}")
+
                 if len(propiedades) > 15:
-                    typer.echo(f"\n... y {len(propiedades) - 15} propiedades más")
+                    typer.echo(
+                        f"\n... y {len(propiedades) - 15} propiedades más")
             else:
-                typer.echo("📭 No se encontraron propiedades disponibles para esta fecha")
+                typer.echo(
+                    "📭 No se encontraron propiedades disponibles para esta fecha")
         else:
             typer.echo(f"❌ Error: {result.get('error', 'Error desconocido')}")
-            
+
     except Exception as e:
         typer.echo(f"❌ Error: {str(e)}")
-    
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 
@@ -4599,33 +4633,35 @@ async def handle_cu5_reservas_ciudad():
     try:
         typer.echo("\n🏙️ CU 5: RESERVAS POR CIUDAD Y FECHA")
         typer.echo("=" * 60)
-        
+
         ciudad_id = typer.prompt("🏙️ ID de la ciudad", type=int)
         fecha_str = typer.prompt("📅 Fecha (YYYY-MM-DD)")
-        
+
         # Validar fecha
         try:
             fecha = datetime.strptime(fecha_str, "%Y-%m-%d").date()
         except ValueError:
             typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
             return
-            
+
         from services.reservations import ReservationService
         service = ReservationService()
-        
-        typer.echo(f"\n🔄 Buscando reservas de ciudad {ciudad_id} para {fecha_str}...")
+
+        typer.echo(
+            f"\n🔄 Buscando reservas de ciudad {ciudad_id} para {fecha_str}...")
         result = await service.get_reservas_ciudad(ciudad_id, fecha)
-        
+
         if result.get("success"):
             reservas = result.get("reservas", [])
-            
+
             typer.echo(f"\n📊 Resultados: {len(reservas)} reservas encontradas")
-            
+
             if reservas:
                 typer.echo("\n" + "-" * 80)
-                typer.echo(f"{'Reserva ID':<12} {'Propiedad':<12} {'Host':<8} {'Huésped':<12} {'Precio':<12} {'Estado':<10}")
+                typer.echo(
+                    f"{'Reserva ID':<12} {'Propiedad':<12} {'Host':<8} {'Huésped':<12} {'Precio':<12} {'Estado':<10}")
                 typer.echo("-" * 80)
-                
+
                 for reserva in reservas:
                     reserva_id = reserva.get('reserva_id', 'N/A')
                     propiedad_id = reserva.get('propiedad_id', 'N/A')
@@ -4633,15 +4669,17 @@ async def handle_cu5_reservas_ciudad():
                     huesped_id = reserva.get('huesped_id', 'N/A')
                     precio = f"${reserva.get('precio_total', 0):.2f}"
                     estado = reserva.get('estado', 'N/A')
-                    typer.echo(f"{reserva_id:<12} {propiedad_id:<12} {host_id:<8} {huesped_id:<12} {precio:<12} {estado:<10}")
+                    typer.echo(
+                        f"{reserva_id:<12} {propiedad_id:<12} {host_id:<8} {huesped_id:<12} {precio:<12} {estado:<10}")
             else:
-                typer.echo("📭 No se encontraron reservas para esta ciudad en esta fecha")
+                typer.echo(
+                    "📭 No se encontraron reservas para esta ciudad en esta fecha")
         else:
             typer.echo(f"❌ Error: {result.get('error', 'Error desconocido')}")
-            
+
     except Exception as e:
         typer.echo(f"❌ Error: {str(e)}")
-    
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 
@@ -4651,60 +4689,67 @@ async def handle_cu6_reservas_host():
     try:
         typer.echo("\n🏡 CU 6: RESERVAS POR HOST Y FECHA")
         typer.echo("=" * 60)
-        
-        host_id_str = typer.prompt("🏡 ID del host/anfitrión (número entero, se convertirá a UUID)")
-        
+
+        host_id_str = typer.prompt(
+            "🏡 ID del host/anfitrión (número entero, se convertirá a UUID)")
+
         try:
             host_id_int = int(host_id_str)
             # Convertir entero a UUID string válido para Cassandra
             # En un caso real, tendrías una tabla de mapeo o usarías UUIDs reales
             import uuid
             # Crear un UUID determinístico basado en el ID
-            host_id_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"host-{host_id_int}"))
-            typer.echo(f"🔄 Convirtiendo host ID {host_id_int} a UUID: {host_id_uuid}")
+            host_id_uuid = str(uuid.uuid5(
+                uuid.NAMESPACE_DNS, f"host-{host_id_int}"))
+            typer.echo(
+                f"🔄 Convirtiendo host ID {host_id_int} a UUID: {host_id_uuid}")
         except ValueError:
             typer.echo("❌ ID del host debe ser un número entero")
             return
         fecha_str = typer.prompt("📅 Fecha (YYYY-MM-DD)")
-        
+
         # Validar fecha
         try:
             fecha = datetime.strptime(fecha_str, "%Y-%m-%d").date()
         except ValueError:
             typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
             return
-            
+
         from services.reservations import ReservationService
         service = ReservationService()
-        
-        typer.echo(f"\n🔄 Buscando reservas del host {host_id_int} para {fecha_str}...")
+
+        typer.echo(
+            f"\n🔄 Buscando reservas del host {host_id_int} para {fecha_str}...")
         result = await service.get_reservas_host(host_id_uuid, fecha)
-        
+
         if result.get("success"):
             reservas = result.get("reservas", [])
-            
+
             typer.echo(f"\n📊 Resultados: {len(reservas)} reservas encontradas")
-            
+
             if reservas:
                 typer.echo("\n" + "-" * 70)
-                typer.echo(f"{'Reserva ID':<12} {'Propiedad':<12} {'Huésped':<12} {'Precio':<12} {'Estado':<10}")
+                typer.echo(
+                    f"{'Reserva ID':<12} {'Propiedad':<12} {'Huésped':<12} {'Precio':<12} {'Estado':<10}")
                 typer.echo("-" * 70)
-                
+
                 for reserva in reservas:
                     reserva_id = reserva.get('reserva_id', 'N/A')
                     propiedad_id = reserva.get('propiedad_id', 'N/A')
                     huesped_id = reserva.get('huesped_id', 'N/A')
                     precio = f"${reserva.get('precio_total', 0):.2f}"
                     estado = reserva.get('estado', 'N/A')
-                    typer.echo(f"{reserva_id:<12} {propiedad_id:<12} {huesped_id:<12} {precio:<12} {estado:<10}")
+                    typer.echo(
+                        f"{reserva_id:<12} {propiedad_id:<12} {huesped_id:<12} {precio:<12} {estado:<10}")
             else:
-                typer.echo("📭 No se encontraron reservas para este host en esta fecha")
+                typer.echo(
+                    "📭 No se encontraron reservas para este host en esta fecha")
         else:
             typer.echo(f"❌ Error: {result.get('error', 'Error desconocido')}")
-            
+
     except Exception as e:
         typer.echo(f"❌ Error: {str(e)}")
-    
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 
@@ -4714,55 +4759,61 @@ async def handle_verificar_disponibilidad():
     try:
         typer.echo("\n🔍 VERIFICAR DISPONIBILIDAD ESPECÍFICA")
         typer.echo("=" * 60)
-        
+
         propiedad_id = typer.prompt("🏠 ID de la propiedad", type=int)
         fecha_str = typer.prompt("📅 Fecha (YYYY-MM-DD)")
-        
+
         # Validar fecha
         try:
             fecha = datetime.strptime(fecha_str, "%Y-%m-%d").date()
         except ValueError:
             typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
             return
-            
+
         from services.reservations import ReservationService
         service = ReservationService()
-        
-        typer.echo(f"\n🔄 Verificando disponibilidad de propiedad {propiedad_id} para {fecha_str}...")
-        
+
+        typer.echo(
+            f"\n🔄 Verificando disponibilidad de propiedad {propiedad_id} para {fecha_str}...")
+
         # Usar el servicio de propiedades disponibles y filtrar
         result = await service.get_propiedades_disponibles_fecha(fecha)
-        
+
         if result.get("success"):
             propiedades = result.get("propiedades", [])
             propiedad_encontrada = None
-            
+
             # Buscar la propiedad específica
             for prop in propiedades:
                 if prop.get('propiedad_id') == propiedad_id:
                     propiedad_encontrada = prop
                     break
-            
+
             typer.echo(f"\n🔍 RESULTADO DE VERIFICACIÓN")
             typer.echo("=" * 50)
             typer.echo(f"🏠 Propiedad ID: {propiedad_id}")
             typer.echo(f"📅 Fecha: {fecha_str}")
-            
+
             if propiedad_encontrada:
                 typer.echo("✅ Estado: DISPONIBLE")
-                typer.echo(f"💰 Precio: ${propiedad_encontrada.get('precio_noche', 0):.2f}/noche")
-                typer.echo(f"🏙️ Ciudad: {propiedad_encontrada.get('ciudad_nombre', 'N/A')}")
-                typer.echo(f"👥 Capacidad: {propiedad_encontrada.get('capacidad_huespedes', 'N/A')} huéspedes")
-                typer.echo(f"📶 WiFi: {'Sí' if propiedad_encontrada.get('wifi', False) else 'No'}")
+                typer.echo(
+                    f"💰 Precio: ${propiedad_encontrada.get('precio_noche', 0):.2f}/noche")
+                typer.echo(
+                    f"🏙️ Ciudad: {propiedad_encontrada.get('ciudad_nombre', 'N/A')}")
+                typer.echo(
+                    f"👥 Capacidad: {propiedad_encontrada.get('capacidad_huespedes', 'N/A')} huéspedes")
+                typer.echo(
+                    f"📶 WiFi: {'Sí' if propiedad_encontrada.get('wifi', False) else 'No'}")
             else:
                 typer.echo("❌ Estado: NO DISPONIBLE")
-                typer.echo("💡 La propiedad no está disponible en esta fecha o no existe")
+                typer.echo(
+                    "💡 La propiedad no está disponible en esta fecha o no existe")
         else:
             typer.echo(f"❌ Error: {result.get('error', 'Error desconocido')}")
-            
+
     except Exception as e:
         typer.echo(f"❌ Error: {str(e)}")
-    
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 
@@ -4772,66 +4823,181 @@ async def handle_test_todos_casos_cassandra():
     try:
         typer.echo("\n🧪 PRUEBA COMPLETA DE CASOS DE USO CASSANDRA")
         typer.echo("=" * 70)
-        
+
         # Usar fecha de ejemplo
         fecha_test = "2026-03-15"
-        
+
         typer.echo(f"📅 Usando fecha de prueba: {fecha_test}")
         typer.echo(f"💡 Probando con datos conocidos del sistema...")
         typer.echo("\n" + "-" * 70)
-        
+
         # Test CU 4: Propiedades disponibles
         typer.echo("\n🔍 Probando CU 4: Propiedades disponibles...")
         from services.reservations import ReservationService
         service = ReservationService()
-        
+
         fecha = datetime.strptime(fecha_test, "%Y-%m-%d").date()
         result = await service.get_propiedades_disponibles_fecha(fecha)
-        
+
         if result.get("success"):
             propiedades = result.get("propiedades", [])
-            typer.echo(f"✅ CU 4 exitoso: {len(propiedades)} propiedades encontradas")
+            typer.echo(
+                f"✅ CU 4 exitoso: {len(propiedades)} propiedades encontradas")
         else:
             typer.echo(f"❌ CU 4 falló: {result.get('error')}")
-        
+
         # Test CU 5: Reservas por ciudad (ciudad 1)
         typer.echo("\n🔍 Probando CU 5: Reservas por ciudad 1...")
         result = await service.get_reservas_ciudad(1, fecha)
-        
+
         if result.get("success"):
             reservas = result.get("reservas", [])
             typer.echo(f"✅ CU 5 exitoso: {len(reservas)} reservas encontradas")
         else:
             typer.echo(f"❌ CU 5 falló: {result.get('error')}")
-        
+
         # Test CU 6: Reservas por host (host 1)
         typer.echo("\n🔍 Probando CU 6: Reservas por host 1...")
         result = await service.get_reservas_host(1, fecha)
-        
+
         if result.get("success"):
             reservas = result.get("reservas", [])
             typer.echo(f"✅ CU 6 exitoso: {len(reservas)} reservas encontradas")
         else:
             typer.echo(f"❌ CU 6 falló: {result.get('error')}")
-        
+
         # Test verificación específica (propiedad 29)
         typer.echo("\n🔍 Probando verificación específica: Propiedad 29...")
         result = await service.get_propiedades_disponibles_fecha(fecha)
-        
+
         if result.get("success"):
             propiedades = result.get("propiedades", [])
             encontrada = any(p.get('propiedad_id') == 29 for p in propiedades)
-            typer.echo(f"✅ Verificación exitosa: Propiedad 29 {'disponible' if encontrada else 'no disponible'}")
+            typer.echo(
+                f"✅ Verificación exitosa: Propiedad 29 {'disponible' if encontrada else 'no disponible'}")
         else:
             typer.echo(f"❌ Verificación falló: {result.get('error')}")
-            
+
         typer.echo("\n" + "=" * 70)
         typer.echo("🎉 PRUEBAS COMPLETADAS")
         typer.echo("💡 Todos los casos de uso de Cassandra han sido probados")
-        
+
     except Exception as e:
         typer.echo(f"❌ Error durante las pruebas: {str(e)}")
-    
+
+    typer.echo("\nPresiona Enter para continuar...")
+    input()
+
+
+async def test_case_9_usuarios_recurrentes():
+    """
+    CU 9/11: Usuarios recurrentes - consulta usuarios que regresaron a la misma ciudad.
+    Utiliza Neo4j con las relaciones User-[:BOOKED_IN]->City creadas durante reservas.
+    """
+    typer.echo("\n" + "=" * 70)
+    typer.echo("🔄 CASO 11: USUARIOS RECURRENTES (NEO4J)")
+    typer.echo("=" * 70)
+    typer.echo("📊 Consultando usuarios que regresaron a la misma ciudad...")
+
+    try:
+        from services.reservations import ReservationService
+        service = ReservationService()
+
+        # Consulta todos los usuarios recurrentes
+        typer.echo("\n1️⃣ Usuarios recurrentes en todas las ciudades:")
+        typer.echo("-" * 50)
+
+        result = await service.get_usuarios_recurrentes()
+
+        if result.get("success"):
+            usuarios = result.get("usuarios_recurrentes", [])
+            estadisticas = result.get("estadisticas_ciudades", {})
+
+            if usuarios:
+                typer.echo(
+                    f"✅ Encontrados {len(usuarios)} usuarios recurrentes")
+                typer.echo("\n📋 TOP 10 USUARIOS MÁS RECURRENTES:")
+                typer.echo(
+                    f"{'#':<3} {'Usuario':<15} {'Ciudad':<20} {'Visitas':<8}")
+                typer.echo("-" * 48)
+
+                for i, usuario in enumerate(usuarios[:10], 1):
+                    user_id = usuario.get('user_id', 'N/A')
+                    city = usuario.get('city', 'N/A')
+                    visits = usuario.get('total_visits', 0)
+
+                    # Iconos por nivel de recurrencia
+                    if visits >= 5:
+                        icon = "🏆"
+                    elif visits >= 3:
+                        icon = "🥇"
+                    else:
+                        icon = "🔄"
+
+                    typer.echo(
+                        f"{i:<3} {user_id:<15} {city:<20} {visits:<3} {icon}")
+
+                # Estadísticas por ciudad
+                typer.echo(f"\n🏙️ ESTADÍSTICAS POR CIUDAD:")
+                typer.echo(
+                    f"{'Ciudad':<20} {'Usuarios':<10} {'Total Visitas':<12}")
+                typer.echo("-" * 44)
+
+                for city, stats in sorted(estadisticas.items(), key=lambda x: x[1]['usuarios'], reverse=True)[:5]:
+                    usuarios_count = stats['usuarios']
+                    total_visitas = stats['total_visitas']
+                    typer.echo(
+                        f"{city:<20} {usuarios_count:<10} {total_visitas:<12}")
+
+            else:
+                typer.echo("ℹ️ No se encontraron usuarios recurrentes.")
+                typer.echo(
+                    "💡 Crea algunas reservas para el mismo usuario en la misma ciudad.")
+        else:
+            typer.echo(f"❌ Error: {result.get('error')}")
+
+        # Consulta específica por ciudad
+        typer.echo("\n2️⃣ Consulta por ciudad específica:")
+        typer.echo("-" * 40)
+
+        ciudad_nombre = typer.prompt(
+            "Ingresa el nombre de la ciudad (o Enter para omitir)", default="", show_default=False)
+
+        if ciudad_nombre.strip():
+            result = await service.get_usuarios_recurrentes(city_name=ciudad_nombre.strip())
+
+            if result.get("success"):
+                usuarios = result.get("usuarios_recurrentes", [])
+
+                if usuarios:
+                    typer.echo(
+                        f"✅ Usuarios recurrentes en {ciudad_nombre}: {len(usuarios)}")
+                    typer.echo(f"\n{'Usuario':<15} {'Visitas':<8}")
+                    typer.echo("-" * 25)
+
+                    for usuario in usuarios:
+                        user_id = usuario.get('user_id', 'N/A')
+                        visits = usuario.get('total_visits', 0)
+                        typer.echo(f"{user_id:<15} {visits:<8}")
+                else:
+                    typer.echo(
+                        f"ℹ️ No hay usuarios recurrentes en {ciudad_nombre}")
+            else:
+                typer.echo(
+                    f"❌ Error consultando {ciudad_nombre}: {result.get('error')}")
+
+        # Información técnica
+        typer.echo("\n🔧 INFORMACIÓN TÉCNICA:")
+        typer.echo(
+            "• Este CU utiliza Neo4j con relaciones User-[:BOOKED_IN]->City")
+        typer.echo("• Las relaciones se crean automáticamente al hacer reservas")
+        typer.echo("• La propiedad 'count' en la relación cuenta las visitas")
+        typer.echo("• Consulta optimizada con índice booked_in_count_idx")
+
+    except Exception as e:
+        logger.error(f"Error en test_case_11_usuarios_recurrentes: {e}")
+        typer.echo(f"❌ Error ejecutando caso 11: {str(e)}")
+
     typer.echo("\nPresiona Enter para continuar...")
     input()
 

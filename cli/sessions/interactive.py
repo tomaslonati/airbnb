@@ -79,7 +79,8 @@ async def show_main_menu(user_profile: UserProfile) -> str:
 
     while True:
         try:
-            choice = typer.prompt(f"Selecciona una opción (1-{len(options)})", type=int)
+            choice = typer.prompt(
+                f"Selecciona una opción (1-{len(options)})", type=int)
             if 1 <= choice <= len(options):
                 if "perfil" in options[choice-1]:
                     return "profile"
@@ -102,7 +103,8 @@ async def show_main_menu(user_profile: UserProfile) -> str:
                 elif "Salir" in options[choice-1]:
                     return "exit"
             else:
-                typer.echo(f"❌ Opción inválida. Selecciona entre 1 y {len(options)}.")
+                typer.echo(
+                    f"❌ Opción inválida. Selecciona entre 1 y {len(options)}.")
         except ValueError:
             typer.echo("❌ Por favor ingresa un número válido.")
 
@@ -194,8 +196,10 @@ async def handle_register(auth_service: AuthService) -> UserProfile:
         typer.echo(f"🎉 ¡Bienvenido/a {result.user_profile.nombre}!")
 
         if result.user_profile.rol in ['ANFITRION', 'AMBOS']:
-            typer.echo(f"🏠 Tu ID de anfitrión es: {result.user_profile.anfitrion_id}")
-            typer.echo("📝 Se ha creado tu documento en MongoDB para gestionar calificaciones")
+            typer.echo(
+                f"🏠 Tu ID de anfitrión es: {result.user_profile.anfitrion_id}")
+            typer.echo(
+                "📝 Se ha creado tu documento en MongoDB para gestionar calificaciones")
 
         return result.user_profile
     else:
@@ -271,7 +275,8 @@ async def show_active_sessions(auth_service: AuthService) -> None:
             typer.echo(f"   🔑 Token: {session.get('token_preview', 'N/A')}")
             typer.echo(f"   📧 Email: {session.get('email', 'N/A')}")
             typer.echo(f"   ⏰ Creada: {session.get('created_at', 'N/A')}")
-            typer.echo(f"   🕒 Última actividad: {session.get('last_activity', 'N/A')}")
+            typer.echo(
+                f"   🕒 Última actividad: {session.get('last_activity', 'N/A')}")
             typer.echo()
 
     typer.echo("Presiona Enter para continuar...")

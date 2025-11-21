@@ -4184,46 +4184,105 @@ async def test_case_8_redis_caching():
         search_service = SearchService()
         reservation_service = ReservationService()
 
-        # Solicitar filtros al usuario
-        typer.echo("\n🔍 Ingresa los filtros de búsqueda:")
+        # Solicitar ciudad primero
+        typer.echo("\n🔍 Selecciona la ciudad:")
         typer.echo("💡 Ciudades disponibles: Buenos Aires, Madrid, Barcelona, Córdoba, Mendoza")
 
         ciudad = typer.prompt("🏙️  Ciudad", default="Buenos Aires")
 
-        capacidad_input = typer.prompt(
-            "👥 Capacidad mínima de huéspedes (Enter para omitir)",
-            default="",
-            show_default=False
-        )
-        capacidad_minima = int(capacidad_input) if capacidad_input else None
+        # Verificar si hay cache para esta ciudad (sin filtros)
+        typer.echo(f"\n🔍 Verificando cache para {ciudad}...")
+        quick_check = await search_service.search_properties(ciudad=ciudad)
 
-        precio_input = typer.prompt(
-            "💰 Precio máximo por noche (Enter para omitir)",
-            default="",
-            show_default=False
-        )
-        precio_maximo = float(precio_input) if precio_input else None
+        # Variables para controlar el flujo
+        use_cached_result = False
+        capacidad_minima = None
+        precio_maximo = None
 
-        # Test 1: Primera búsqueda (Cache MISS)
-        typer.echo(f"\n📍 Test 1: Primera búsqueda - {ciudad}")
-        if capacidad_minima:
-            typer.echo(f"   👥 Capacidad mínima: {capacidad_minima}")
-        if precio_maximo:
-            typer.echo(f"   💰 Precio máximo: ${precio_maximo}")
-        typer.echo("   Estado esperado: Cache MISS (consulta Cassandra)")
+        if quick_check.get('success') and quick_check.get('cached'):
+            # Cache HIT!
+            typer.echo(f"   🎉 ¡Cache encontrado! {quick_check['count']} propiedades en cache")
+            typer.echo("   ⚡ Datos servidos desde Redis")
 
-        result1 = await search_service.search_properties(
-            ciudad=ciudad,
-            capacidad_minima=capacidad_minima,
-            precio_maximo=precio_maximo
-        )
+            show_cached = typer.prompt(
+                "\n¿Quieres ver las propiedades en cache? (s/n)",
+                default="s"
+            )
+
+            if show_cached.lower() == 's':
+                typer.echo("\n📦 PROPIEDADES EN CACHE:")
+                typer.echo("-" * 80)
+                typer.echo(f"{'ID':<8} {'Nombre':<30} {'Capacidad':<12} {'Precio/Noche':<15} {'WiFi'}")
+                typer.echo("-" * 80)
+
+                for prop in quick_check['properties'][:10]:
+                    prop_id = prop.get('propiedad_id', 'N/A')
+                    nombre = prop.get('propiedad_nombre', prop.get('nombre', 'Sin nombre'))[:28]
+                    capacidad = prop.get('capacidad_huespedes', prop.get('capacidad', 'N/A'))
+                    precio = f"${prop.get('precio_noche', 0):.2f}"
+                    wifi = "✓" if prop.get('wifi') else "✗"
+                    typer.echo(f"{prop_id:<8} {nombre:<30} {capacidad:<12} {precio:<15} {wifi}")
+
+                if quick_check['count'] > 10:
+                    typer.echo(f"\n... y {quick_check['count'] - 10} propiedades más")
+
+            # Preguntar si quiere aplicar filtros
+            apply_filters = typer.prompt(
+                "\n¿Quieres aplicar filtros adicionales? (s/n)",
+                default="n"
+            )
+
+            if apply_filters.lower() == 'n':
+                # Usar los datos cacheados como result1
+                result1 = quick_check
+                use_cached_result = True
+                typer.echo("\n✅ Usando resultados en cache sin filtros adicionales")
+            else:
+                use_cached_result = False
+        else:
+            # No hay cache o primera vez
+            if not quick_check.get('cached'):
+                typer.echo("   ℹ️  No hay cache para esta ciudad")
+
+        # Si no usamos el resultado cacheado, solicitar filtros y hacer búsqueda
+        if not use_cached_result:
+            typer.echo("\n🔍 Ingresa filtros adicionales:")
+
+            capacidad_input = typer.prompt(
+                "👥 Capacidad mínima de huéspedes (Enter para omitir)",
+                default="",
+                show_default=False
+            )
+            capacidad_minima = int(capacidad_input) if capacidad_input else None
+
+            precio_input = typer.prompt(
+                "💰 Precio máximo por noche (Enter para omitir)",
+                default="",
+                show_default=False
+            )
+            precio_maximo = float(precio_input) if precio_input else None
+
+            # Test 1: Búsqueda con filtros
+            typer.echo(f"\n📍 Test 1: Búsqueda - {ciudad}")
+            if capacidad_minima:
+                typer.echo(f"   👥 Capacidad mínima: {capacidad_minima}")
+            if precio_maximo:
+                typer.echo(f"   💰 Precio máximo: ${precio_maximo}")
+            typer.echo("   Estado esperado: Cache MISS (consulta Cassandra)" if not quick_check.get('cached') else "   Consultando con filtros...")
+
+            result1 = await search_service.search_properties(
+                ciudad=ciudad,
+                capacidad_minima=capacidad_minima,
+                precio_maximo=precio_maximo
+            )
 
         if result1.get("success"):
             typer.echo(f"   ✅ Encontradas {result1['count']} propiedades")
-            typer.echo(f"   📊 Cached: {result1['cached']} (esperado: False)")
+            expected_cached = "True" if use_cached_result else "False"
+            typer.echo(f"   📊 Cached: {result1['cached']} (esperado: {expected_cached})")
 
-            # Mostrar resultados
-            if result1['count'] > 0:
+            # Mostrar resultados (solo si no los mostramos ya en la sección de cache)
+            if result1['count'] > 0 and not use_cached_result:
                 show_results = typer.prompt(
                     "\n¿Quieres ver los resultados? (s/n)",
                     default="s"
@@ -4238,8 +4297,8 @@ async def test_case_8_redis_caching():
                     # Mostrar máximo 10 resultados
                     for prop in result1['properties'][:10]:
                         prop_id = prop.get('propiedad_id', 'N/A')
-                        nombre = prop.get('nombre', 'Sin nombre')[:28]
-                        capacidad = prop.get('capacidad', 'N/A')
+                        nombre = prop.get('propiedad_nombre', prop.get('nombre', 'Sin nombre'))[:28]
+                        capacidad = prop.get('capacidad_huespedes', prop.get('capacidad', 'N/A'))
                         precio = f"${prop.get('precio_noche', 0):.2f}"
                         wifi = "✓" if prop.get('wifi') else "✗"
                         typer.echo(f"{prop_id:<8} {nombre:<30} {capacidad:<12} {precio:<15} {wifi}")
@@ -4288,8 +4347,8 @@ async def test_case_8_redis_caching():
 
                         for prop in result2['properties'][:10]:
                             prop_id = prop.get('propiedad_id', 'N/A')
-                            nombre = prop.get('nombre', 'Sin nombre')[:28]
-                            capacidad = prop.get('capacidad', 'N/A')
+                            nombre = prop.get('propiedad_nombre', prop.get('nombre', 'Sin nombre'))[:28]
+                            capacidad = prop.get('capacidad_huespedes', prop.get('capacidad', 'N/A'))
                             precio = f"${prop.get('precio_noche', 0):.2f}"
                             wifi = "✓" if prop.get('wifi') else "✗"
                             typer.echo(f"{prop_id:<8} {nombre:<30} {capacidad:<12} {precio:<15} {wifi}")
@@ -4352,8 +4411,8 @@ async def test_case_8_redis_caching():
 
                         for prop in result3['properties'][:10]:
                             prop_id = prop.get('propiedad_id', 'N/A')
-                            nombre = prop.get('nombre', 'Sin nombre')[:28]
-                            capacidad = prop.get('capacidad', 'N/A')
+                            nombre = prop.get('propiedad_nombre', prop.get('nombre', 'Sin nombre'))[:28]
+                            capacidad = prop.get('capacidad_huespedes', prop.get('capacidad', 'N/A'))
                             precio = f"${prop.get('precio_noche', 0):.2f}"
                             wifi = "✓" if prop.get('wifi') else "✗"
                             typer.echo(f"{prop_id:<8} {nombre:<30} {capacidad:<12} {precio:<15} {wifi}")

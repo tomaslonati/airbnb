@@ -96,10 +96,8 @@ class Neo4jReservationService:
             query = """
             MERGE (host:Usuario {user_id: $host_id})
             MERGE (guest:Usuario {user_id: $guest_id})
-            
             MERGE (guest)-[rel:INTERACCIONES]->(host)
-            
-            ON CREATE SET 
+            ON CREATE SET
                 rel.count = 1,
                 rel.reservas = [$reservation_id],
                 rel.propiedades = [$property_id],
@@ -107,54 +105,57 @@ class Neo4jReservationService:
                 rel.ultima_interaccion = date($fecha),
                 rel.created_at = datetime(),
                 rel.updated_at = datetime()
-            
             ON MATCH SET
                 rel.count = rel.count + 1,
                 rel.reservas = rel.reservas + $reservation_id,
-                rel.propiedades = CASE 
-                    WHEN $property_id IN rel.propiedades 
-                    THEN rel.propiedades 
-                    ELSE rel.propiedades + $property_id 
+                rel.propiedades = CASE
+                    WHEN $property_id IN rel.propiedades
+                    THEN rel.propiedades
+                    ELSE rel.propiedades + $property_id
                 END,
                 rel.ultima_interaccion = date($fecha),
                 rel.updated_at = datetime()
-                
-            RETURN 
+            RETURN
                 rel.count as total_interacciones,
                 rel.reservas as reservas,
                 size(rel.propiedades) as propiedades_distintas
             """
 
-            result = driver.execute_query(
+            # Usar parameters_ en lugar de kwargs directos
+            records, summary, keys = driver.execute_query(
                 query,
-                host_id=host_user_id,
-                guest_id=guest_user_id,
-                reservation_id=reservation_id,
-                property_id=property_id,
-                fecha=str(reservation_date)
+                parameters_={
+                    "host_id": int(host_user_id),
+                    "guest_id": int(guest_user_id),
+                    "reservation_id": int(reservation_id),
+                    "property_id": int(property_id),
+                    "fecha": str(reservation_date)
+                },
+                database_="neo4j"
             )
 
-            if result and result[0]:
-                record = result[0][0]
+            if records and len(records) > 0:
+                # Convertir el record a dict
+                record = dict(records[0])
                 total_interactions = record['total_interacciones']
                 propiedades_distintas = record['propiedades_distintas']
 
                 logger.info(
-                    f"Relación actualizada: Usuario {guest_user_id} -> Host {host_user_id}, "
-                    f"Total interacciones: {total_interactions}, "
-                    f"Propiedades distintas: {propiedades_distintas}"
+                    f"✅ Neo4j REAL: Usuario {guest_user_id} -> Host {host_user_id}, "
+                    f"Interacciones: {total_interactions}, "
+                    f"Propiedades: {propiedades_distintas}"
                 )
 
                 return {
                     "success": True,
                     "total_interactions": total_interactions,
                     "unique_properties": propiedades_distintas,
-                    "is_community": total_interactions > 3,  # Para el CU
+                    "is_community": total_interactions > 3,
                     "reservations": record['reservas']
                 }
             else:
-                logger.warning("No se pudo crear/actualizar la relación")
-                return {"success": False, "error": "No se encontraron usuarios"}
+                logger.warning("❌ Query Neo4j no retornó resultados")
+                return {"success": False, "error": "No se creó la relación"}
 
         except Exception as e:
             logger.error(f"Error creando interacción host-guest: {str(e)}")

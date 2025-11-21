@@ -148,7 +148,7 @@ def quick_check():
         original_uri = db_config.neo4j_uri
         if not original_uri:
             return False
-            
+
         # Solo verificar si podemos resolver el hostname
         match = re.match(r'neo4j\+s://([^:]+)', original_uri)
         if match:
@@ -157,13 +157,9 @@ def quick_check():
             logger.info("Neo4j quick check: DNS OK")
             return True
         return False
-        
-    except Exception as e:
-        logger.warning(f"Neo4j quick check failed: {e}")
-        return False
 
     except Exception as e:
-        logger.warning(f"Neo4j no disponible: {e}")
+        logger.warning(f"Neo4j quick check failed: {e}")
         return False
 
 
@@ -172,26 +168,34 @@ def execute_query(query: str, parameters: dict = None, database: str = "neo4j"):
     try:
         driver = _neo4j_driver
         if not driver:
-            logger.error("Driver Neo4j no inicializado")
-            return None
+            error_msg = "Driver Neo4j no inicializado - debe llamar a get_client() primero"
+            logger.error(error_msg)
+            raise ConnectionError(error_msg)
 
+        # El driver.execute_query retorna una tupla (records, summary, keys)
         records, summary, keys = driver.execute_query(
             query,
-            parameters=parameters or {},
+            parameters_=parameters or {},
             database_=database
         )
 
-        logger.info(f"Consulta ejecutada: {summary.query[:100]}...")
-        logger.info(f"Registros devueltos: {len(records)}")
+        logger.info(f"✅ Query Neo4j ejecutada: {len(records)} registros")
+
+        # Convertir records a formato dict para facilitar acceso
+        records_as_dicts = []
+        for record in records:
+            records_as_dicts.append(dict(record))
 
         return {
-            "records": records,
+            "records": records_as_dicts,
             "summary": summary,
             "keys": keys
         }
 
     except Exception as e:
-        logger.error(f"Error ejecutando consulta Neo4j: {e}")
+        logger.error(f"❌ Error ejecutando consulta Neo4j: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise
 
 
@@ -235,7 +239,7 @@ def create_node(label: str, properties: dict):
         query = f"CREATE (n:{label} {{{props}}}) RETURN n"
 
         result = driver.execute_query(
-            query, parameters=properties, database_="neo4j")
+            query, parameters_=properties, database_="neo4j")
         logger.info(f"Nodo {label} creado exitosamente")
         return result
 
@@ -262,7 +266,7 @@ def find_nodes(label: str, properties: dict = None):
             params = {}
 
         result = driver.execute_query(
-            query, parameters=params, database_="neo4j")
+            query, parameters_=params, database_="neo4j")
         return result[0]  # records
 
     except Exception as e:
@@ -290,7 +294,7 @@ def get_recommendations(user_id: str, limit: int = 5):
 
         records, summary, keys = driver.execute_query(
             query,
-            parameters={"user_id": user_id, "limit": limit},
+            parameters_={"user_id": user_id, "limit": limit},
             database_="neo4j"
         )
 

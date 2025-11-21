@@ -4169,291 +4169,220 @@ async def test_case_8_redis_caching():
     """
     Caso de uso 8: Property Search Results Caching with Redis (TTL: 5 minutes).
     Demuestra caching de búsquedas de propiedades con invalidación automática.
+
+    Flujo simplificado:
+    1. Usuario ingresa filtros de búsqueda
+    2. Se realiza la búsqueda (MISS = consulta a PostgreSQL, HIT = desde Redis)
+    3. Se muestra claramente si se usó cache o no
+    4. Opción de repetir la misma búsqueda (debería estar en cache)
     """
     try:
         typer.echo("\n🔴 CASO DE USO 8: REDIS CACHING PARA BÚSQUEDAS")
         typer.echo("=" * 70)
-        typer.echo("💾 Demuestra caching de búsquedas con TTL de 5 minutos")
-        typer.echo("🔄 Invalidación automática al crear/cancelar reservas")
+        typer.echo("💾 Cache de búsquedas con TTL de 5 minutos")
+        typer.echo("🔄 PostgreSQL → Redis → Cliente")
         typer.echo("-" * 70)
 
         from services.search import SearchService
-        from services.reservations import ReservationService
-        from datetime import date, timedelta
-
         search_service = SearchService()
-        reservation_service = ReservationService()
 
-        # Solicitar ciudad primero
-        typer.echo("\n🔍 Selecciona la ciudad:")
+        # ========================================
+        # PASO 1: PEDIR FILTROS DE BÚSQUEDA
+        # ========================================
+        typer.echo("\n🔍 PASO 1: INGRESA LOS FILTROS DE BÚSQUEDA")
+        typer.echo("-" * 70)
         typer.echo("💡 Ciudades disponibles: Buenos Aires, Madrid, Barcelona, Córdoba, Mendoza")
 
         ciudad = typer.prompt("🏙️  Ciudad", default="Buenos Aires")
 
-        # Verificar si hay cache para esta ciudad (sin filtros)
-        typer.echo(f"\n🔍 Verificando cache para {ciudad}...")
-        quick_check = await search_service.search_properties(ciudad=ciudad)
+        capacidad_input = typer.prompt(
+            "👥 Capacidad mínima de huéspedes (Enter para omitir)",
+            default="",
+            show_default=False
+        )
+        capacidad_minima = int(capacidad_input) if capacidad_input else None
 
-        # Variables para controlar el flujo
-        use_cached_result = False
-        capacidad_minima = None
-        precio_maximo = None
+        precio_input = typer.prompt(
+            "💰 Precio máximo por noche (Enter para omitir)",
+            default="",
+            show_default=False
+        )
+        precio_maximo = float(precio_input) if precio_input else None
 
-        if quick_check.get('success') and quick_check.get('cached'):
-            # Cache HIT!
-            typer.echo(f"   🎉 ¡Cache encontrado! {quick_check['count']} propiedades en cache")
-            typer.echo("   ⚡ Datos servidos desde Redis")
+        # ========================================
+        # PASO 2: PRIMERA BÚSQUEDA
+        # ========================================
+        typer.echo("\n" + "=" * 70)
+        typer.echo("🔍 PASO 2: REALIZANDO PRIMERA BÚSQUEDA...")
+        typer.echo("-" * 70)
+        typer.echo(f"   Ciudad: {ciudad}")
+        if capacidad_minima:
+            typer.echo(f"   Capacidad mínima: {capacidad_minima} personas")
+        if precio_maximo:
+            typer.echo(f"   Precio máximo: ${precio_maximo}")
+        typer.echo("")
 
-            show_cached = typer.prompt(
-                "\n¿Quieres ver las propiedades en cache? (s/n)",
-                default="s"
-            )
+        # Realizar búsqueda
+        result1 = await search_service.search_properties(
+            ciudad=ciudad,
+            capacidad_minima=capacidad_minima,
+            precio_maximo=precio_maximo
+        )
 
-            if show_cached.lower() == 's':
-                typer.echo("\n📦 PROPIEDADES EN CACHE:")
-                typer.echo("-" * 80)
-                typer.echo(f"{'ID':<8} {'Nombre':<30} {'Capacidad':<12} {'Precio/Noche':<15} {'WiFi'}")
-                typer.echo("-" * 80)
-
-                for prop in quick_check['properties'][:10]:
-                    prop_id = prop.get('propiedad_id', 'N/A')
-                    nombre = prop.get('propiedad_nombre', prop.get('nombre', 'Sin nombre'))[:28]
-                    capacidad = prop.get('capacidad_huespedes', prop.get('capacidad', 'N/A'))
-                    precio = f"${prop.get('precio_noche', 0):.2f}"
-                    wifi = "✓" if prop.get('wifi') else "✗"
-                    typer.echo(f"{prop_id:<8} {nombre:<30} {capacidad:<12} {precio:<15} {wifi}")
-
-                if quick_check['count'] > 10:
-                    typer.echo(f"\n... y {quick_check['count'] - 10} propiedades más")
-
-            # Preguntar si quiere aplicar filtros
-            apply_filters = typer.prompt(
-                "\n¿Quieres aplicar filtros adicionales? (s/n)",
-                default="n"
-            )
-
-            if apply_filters.lower() == 'n':
-                # Usar los datos cacheados como result1
-                result1 = quick_check
-                use_cached_result = True
-                typer.echo("\n✅ Usando resultados en cache sin filtros adicionales")
-            else:
-                use_cached_result = False
-        else:
-            # No hay cache o primera vez
-            if not quick_check.get('cached'):
-                typer.echo("   ℹ️  No hay cache para esta ciudad")
-
-        # Si no usamos el resultado cacheado, solicitar filtros y hacer búsqueda
-        if not use_cached_result:
-            typer.echo("\n🔍 Ingresa filtros adicionales:")
-
-            capacidad_input = typer.prompt(
-                "👥 Capacidad mínima de huéspedes (Enter para omitir)",
-                default="",
-                show_default=False
-            )
-            capacidad_minima = int(capacidad_input) if capacidad_input else None
-
-            precio_input = typer.prompt(
-                "💰 Precio máximo por noche (Enter para omitir)",
-                default="",
-                show_default=False
-            )
-            precio_maximo = float(precio_input) if precio_input else None
-
-            # Test 1: Búsqueda con filtros
-            typer.echo(f"\n📍 Test 1: Búsqueda - {ciudad}")
-            if capacidad_minima:
-                typer.echo(f"   👥 Capacidad mínima: {capacidad_minima}")
-            if precio_maximo:
-                typer.echo(f"   💰 Precio máximo: ${precio_maximo}")
-            typer.echo("   Estado esperado: Cache MISS (consulta Cassandra)" if not quick_check.get('cached') else "   Consultando con filtros...")
-
-            result1 = await search_service.search_properties(
-                ciudad=ciudad,
-                capacidad_minima=capacidad_minima,
-                precio_maximo=precio_maximo
-            )
-
-        if result1.get("success"):
-            typer.echo(f"   ✅ Encontradas {result1['count']} propiedades")
-            expected_cached = "True" if use_cached_result else "False"
-            typer.echo(f"   📊 Cached: {result1['cached']} (esperado: {expected_cached})")
-
-            # Mostrar resultados (solo si no los mostramos ya en la sección de cache)
-            if result1['count'] > 0 and not use_cached_result:
-                show_results = typer.prompt(
-                    "\n¿Quieres ver los resultados? (s/n)",
-                    default="s"
-                )
-
-                if show_results.lower() == 's':
-                    typer.echo("\n📋 PROPIEDADES ENCONTRADAS:")
-                    typer.echo("-" * 80)
-                    typer.echo(f"{'ID':<8} {'Nombre':<30} {'Capacidad':<12} {'Precio/Noche':<15} {'WiFi'}")
-                    typer.echo("-" * 80)
-
-                    # Mostrar máximo 10 resultados
-                    for prop in result1['properties'][:10]:
-                        prop_id = prop.get('propiedad_id', 'N/A')
-                        nombre = prop.get('propiedad_nombre', prop.get('nombre', 'Sin nombre'))[:28]
-                        capacidad = prop.get('capacidad_huespedes', prop.get('capacidad', 'N/A'))
-                        precio = f"${prop.get('precio_noche', 0):.2f}"
-                        wifi = "✓" if prop.get('wifi') else "✗"
-                        typer.echo(f"{prop_id:<8} {nombre:<30} {capacidad:<12} {precio:<15} {wifi}")
-
-                    if result1['count'] > 10:
-                        typer.echo(f"\n... y {result1['count'] - 10} propiedades más")
-        else:
+        if not result1.get("success"):
             typer.echo(f"   ❌ Error: {result1.get('error')}")
             return
 
-        # Test 2: Misma búsqueda (Cache HIT)
-        test2_choice = typer.prompt(
-            "\n¿Quieres verificar que los datos se cachearon en Redis? (s/n)",
+        # ========================================
+        # MOSTRAR RESULTADO DE PRIMERA BÚSQUEDA
+        # ========================================
+        typer.echo("📊 RESULTADO:")
+        typer.echo("   " + "=" * 65)
+
+        if result1.get('cached'):
+            typer.echo("   🟢 CACHE HIT - Datos servidos desde Redis")
+            typer.echo("   ⚡ Respuesta instantánea (< 1ms)")
+            typer.echo("   📍 Origen: Redis Cache")
+        else:
+            typer.echo("   🔴 CACHE MISS - No había datos en cache")
+            typer.echo("   🔄 Consultando PostgreSQL...")
+            typer.echo("   💾 Guardando en Redis (TTL: 5 minutos)")
+            typer.echo("   📍 Origen: PostgreSQL")
+
+        typer.echo("   " + "=" * 65)
+        typer.echo(f"   ✅ {result1['count']} propiedades encontradas")
+        typer.echo("")
+
+        # Mostrar algunos resultados
+        if result1['count'] > 0:
+            typer.echo("📋 PROPIEDADES ENCONTRADAS (primeras 5):")
+            typer.echo("-" * 80)
+            typer.echo(f"{'ID':<8} {'Nombre':<30} {'Capacidad':<12} {'Precio/Noche':<15} {'WiFi'}")
+            typer.echo("-" * 80)
+
+            for prop in result1['properties'][:5]:
+                prop_id = prop.get('propiedad_id', 'N/A')
+                nombre = prop.get('propiedad_nombre', prop.get('nombre', 'Sin nombre'))[:28]
+                capacidad = prop.get('capacidad_huespedes', prop.get('capacidad', 'N/A'))
+                precio = f"${prop.get('precio_noche', 0):.2f}"
+                wifi = "✓" if prop.get('wifi') else "✗"
+                typer.echo(f"{prop_id:<8} {nombre:<30} {capacidad:<12} {precio:<15} {wifi}")
+
+            if result1['count'] > 5:
+                typer.echo(f"... y {result1['count'] - 5} propiedades más")
+            typer.echo("")
+
+        # ========================================
+        # PASO 3: OFRECER REPETIR LA BÚSQUEDA
+        # ========================================
+        typer.echo("=" * 70)
+        repeat = typer.prompt(
+            "🔁 ¿Quieres repetir la MISMA búsqueda para verificar el cache? (s/n)",
             default="s"
         )
 
-        if test2_choice.lower() == 's':
-            typer.echo("\n📍 Test 2: Misma búsqueda (debería estar en cache)")
-            typer.echo("   Estado esperado: Cache HIT (desde Redis)")
+        if repeat.lower() != 's':
+            typer.echo("\n✅ Caso de uso completado")
+            return
 
-            result2 = await search_service.search_properties(
-                ciudad=ciudad,
-                capacidad_minima=capacidad_minima,
-                precio_maximo=precio_maximo
-            )
+        # ========================================
+        # PASO 4: SEGUNDA BÚSQUEDA (DEBERÍA ESTAR EN CACHE)
+        # ========================================
+        typer.echo("\n" + "=" * 70)
+        typer.echo("🔍 PASO 3: REPITIENDO LA MISMA BÚSQUEDA...")
+        typer.echo("-" * 70)
+        typer.echo(f"   Ciudad: {ciudad}")
+        if capacidad_minima:
+            typer.echo(f"   Capacidad mínima: {capacidad_minima} personas")
+        if precio_maximo:
+            typer.echo(f"   Precio máximo: ${precio_maximo}")
+        typer.echo(f"   🎯 DEBERÍA estar en Redis cache")
+        typer.echo("")
 
-            if result2.get("success"):
-                typer.echo(f"   ✅ Encontradas {result2['count']} propiedades")
-                typer.echo(f"   📊 Cached: {result2['cached']} (esperado: True) {'✓' if result2['cached'] else '✗'}")
-
-                if result2['cached']:
-                    typer.echo("   🎉 ¡CACHE HIT! Datos servidos desde Redis")
-                    typer.echo("   ⚡ Respuesta instantánea sin consultar Cassandra")
-
-                    # Opción de ver datos cacheados
-                    show_cached = typer.prompt(
-                        "\n¿Quieres ver los datos que vinieron del cache? (s/n)",
-                        default="n"
-                    )
-
-                    if show_cached.lower() == 's':
-                        typer.echo("\n📦 DATOS DESDE REDIS CACHE:")
-                        typer.echo("-" * 80)
-                        typer.echo(f"{'ID':<8} {'Nombre':<30} {'Capacidad':<12} {'Precio/Noche':<15} {'WiFi'}")
-                        typer.echo("-" * 80)
-
-                        for prop in result2['properties'][:10]:
-                            prop_id = prop.get('propiedad_id', 'N/A')
-                            nombre = prop.get('propiedad_nombre', prop.get('nombre', 'Sin nombre'))[:28]
-                            capacidad = prop.get('capacidad_huespedes', prop.get('capacidad', 'N/A'))
-                            precio = f"${prop.get('precio_noche', 0):.2f}"
-                            wifi = "✓" if prop.get('wifi') else "✗"
-                            typer.echo(f"{prop_id:<8} {nombre:<30} {capacidad:<12} {precio:<15} {wifi}")
-
-                        if result2['count'] > 10:
-                            typer.echo(f"\n... y {result2['count'] - 10} propiedades más")
-                else:
-                    typer.echo("   ⚠️  Cache no funcionó, revisar logs")
-
-        # Test 3: Búsqueda diferente (Cache MISS)
-        test3_choice = typer.prompt(
-            "\n¿Quieres probar una búsqueda con filtros diferentes? (s/n)",
-            default="s"
+        # Realizar segunda búsqueda con los mismos parámetros
+        result2 = await search_service.search_properties(
+            ciudad=ciudad,
+            capacidad_minima=capacidad_minima,
+            precio_maximo=precio_maximo
         )
 
-        if test3_choice.lower() == 's':
-            typer.echo("\n📍 Test 3: Búsqueda con filtros diferentes")
-            typer.echo("🔍 Ingresa nuevos filtros:")
+        if not result2.get("success"):
+            typer.echo(f"   ❌ Error: {result2.get('error')}")
+            return
 
-            ciudad3 = typer.prompt("🏙️  Ciudad", default=ciudad)
+        # ========================================
+        # VERIFICAR QUE SE USÓ CACHE
+        # ========================================
+        typer.echo("📊 RESULTADO:")
+        typer.echo("   " + "=" * 65)
 
-            capacidad_input3 = typer.prompt(
-                "👥 Capacidad mínima (Enter para omitir)",
-                default="",
-                show_default=False
-            )
-            capacidad_minima3 = int(capacidad_input3) if capacidad_input3 else None
+        if result2.get('cached'):
+            typer.echo("   ✅✅✅ ¡ÉXITO! CACHE HIT")
+            typer.echo("   🟢 Datos servidos desde Redis")
+            typer.echo("   ⚡ Respuesta instantánea (< 1ms)")
+            typer.echo("   💡 No se consultó PostgreSQL")
+            typer.echo("   📍 Origen: Redis Cache")
+            typer.echo("")
+            typer.echo("   🎉 EL CACHING FUNCIONA CORRECTAMENTE")
+        else:
+            typer.echo("   ⚠️  ADVERTENCIA: CACHE MISS (no debería pasar)")
+            typer.echo("   🔴 Se consultó PostgreSQL nuevamente")
+            typer.echo("   ⚠️  Posible problema con Redis")
 
-            precio_input3 = typer.prompt(
-                "💰 Precio máximo (Enter para omitir)",
-                default="",
-                show_default=False
-            )
-            precio_maximo3 = float(precio_input3) if precio_input3 else None
+        typer.echo("   " + "=" * 65)
+        typer.echo(f"   ✅ {result2['count']} propiedades encontradas")
+        typer.echo("")
 
-            typer.echo("   Estado esperado: Cache MISS (nuevos parámetros)")
-
-            result3 = await search_service.search_properties(
-                ciudad=ciudad3,
-                capacidad_minima=capacidad_minima3,
-                precio_maximo=precio_maximo3
-            )
-
-            if result3.get("success"):
-                typer.echo(f"   ✅ Encontradas {result3['count']} propiedades")
-                typer.echo(f"   📊 Cached: {result3['cached']} (esperado: False)")
-
-                # Mostrar resultados de Test 3
-                if result3['count'] > 0:
-                    show_results3 = typer.prompt(
-                        "\n¿Quieres ver estos resultados? (s/n)",
-                        default="n"
-                    )
-
-                    if show_results3.lower() == 's':
-                        typer.echo("\n📋 PROPIEDADES ENCONTRADAS (Test 3):")
-                        typer.echo("-" * 80)
-                        typer.echo(f"{'ID':<8} {'Nombre':<30} {'Capacidad':<12} {'Precio/Noche':<15} {'WiFi'}")
-                        typer.echo("-" * 80)
-
-                        for prop in result3['properties'][:10]:
-                            prop_id = prop.get('propiedad_id', 'N/A')
-                            nombre = prop.get('propiedad_nombre', prop.get('nombre', 'Sin nombre'))[:28]
-                            capacidad = prop.get('capacidad_huespedes', prop.get('capacidad', 'N/A'))
-                            precio = f"${prop.get('precio_noche', 0):.2f}"
-                            wifi = "✓" if prop.get('wifi') else "✗"
-                            typer.echo(f"{prop_id:<8} {nombre:<30} {capacidad:<12} {precio:<15} {wifi}")
-
-                        if result3['count'] > 10:
-                            typer.echo(f"\n... y {result3['count'] - 10} propiedades más")
-
-        # Test 4: Demo de invalidación (opcional)
-        typer.echo("\n📍 Test 4: Demostración de invalidación de cache")
-        typer.echo("   ℹ️  Al crear una reserva, el cache se invalida automáticamente")
-        typer.echo("   💡 Para probar: crea una reserva en Buenos Aires y busca de nuevo")
-
-        # Mostrar info de cache
-        typer.echo("\n📋 INFORMACIÓN DE CACHE:")
+        # ========================================
+        # RESUMEN COMPARATIVO
+        # ========================================
+        typer.echo("=" * 70)
+        typer.echo("📈 RESUMEN COMPARATIVO")
+        typer.echo("-" * 70)
+        typer.echo(f"Primera búsqueda:  {'🔴 MISS' if not result1.get('cached') else '🟢 HIT'} - Origen: {'PostgreSQL' if not result1.get('cached') else 'Redis'}")
+        typer.echo(f"Segunda búsqueda:  {'🟢 HIT' if result2.get('cached') else '🔴 MISS'} - Origen: {'Redis' if result2.get('cached') else 'PostgreSQL'}")
+        typer.echo("")
+        typer.echo("📋 INFORMACIÓN DE CACHE:")
         typer.echo(f"   ⏱️  TTL: {search_service.cache_ttl} segundos (5 minutos)")
-        typer.echo(f"   🗂️  Claves trackeadas por ciudad_id")
-        typer.echo(f"   🔄 Invalidación automática en create/cancel reservation")
+        typer.echo(f"   🔑 Cache Key: search:{ciudad.lower().replace(' ', '_')}" +
+                  (f":cap_{capacidad_minima}" if capacidad_minima else "") +
+                  (f":price_{int(precio_maximo)}" if precio_maximo else ""))
+        typer.echo(f"   🔄 Invalidación: Automática al crear/cancelar reservas")
 
-        # Test 5: Clear cache
+        # ========================================
+        # OPCIÓN DE LIMPIAR CACHE
+        # ========================================
+        typer.echo("\n" + "=" * 70)
         clear_choice = typer.prompt(
-            f"\n¿Quieres limpiar el cache de {ciudad}? (s/n)",
+            f"🧹 ¿Quieres limpiar el cache de {ciudad}? (s/n)",
             default="n"
         )
 
         if clear_choice.lower() == 's':
             await search_service.clear_cache(ciudad=ciudad)
-            typer.echo(f"   🧹 Cache limpiado para {ciudad}")
+            typer.echo(f"✅ Cache limpiado para {ciudad}")
 
-            # Buscar de nuevo para confirmar
+            # Buscar de nuevo para confirmar que no hay cache
+            typer.echo("\n🔍 Verificando que el cache fue limpiado...")
             result_after_clear = await search_service.search_properties(
                 ciudad=ciudad,
                 capacidad_minima=capacidad_minima,
                 precio_maximo=precio_maximo
             )
-            typer.echo(f"   📊 Búsqueda después de limpiar - Cached: {result_after_clear.get('cached')} (esperado: False)")
+
+            if result_after_clear.get('cached'):
+                typer.echo("   ⚠️  Aún hay datos en cache (no debería pasar)")
+            else:
+                typer.echo("   ✅ Confirmado: CACHE MISS - Cache limpiado correctamente")
 
         typer.echo("\n" + "=" * 70)
         typer.echo("✅ CASO DE USO 8 COMPLETADO")
-        typer.echo("💡 El caching Redis está funcionando correctamente")
-        typer.echo("💡 Las búsquedas se cachean por 5 minutos")
-        typer.echo("💡 El cache se invalida automáticamente con nuevas reservas")
+        typer.echo("=" * 70)
+        typer.echo("💡 CONCLUSIONES:")
+        typer.echo("   • Primera búsqueda: Consulta PostgreSQL y guarda en Redis")
+        typer.echo("   • Búsquedas subsiguientes: Respuesta instantánea desde Redis")
+        typer.echo("   • TTL de 5 minutos: Los datos expiran automáticamente")
+        typer.echo("   • Invalidación inteligente: Se limpia al crear/cancelar reservas")
 
     except Exception as e:
         typer.echo(f"\n❌ Error en caso de uso 8: {str(e)}")

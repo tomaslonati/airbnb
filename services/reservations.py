@@ -79,51 +79,48 @@ class ReservationService:
         Esto cumple con el CU 9: Usuarios que regresaron a la misma ciudad (>=2 reservas).
         """
         try:
-            # Quick check de Neo4j (solo DNS, sin conexión real)
-            if not neo4j.quick_check():
-                logger.warning("Neo4j no disponible, usando simulador")
-                # Usar simulador inmediatamente
+            # Asegurar que el cliente Neo4j esté inicializado primero
+            driver = await neo4j.get_client()
+
+            # Verificar que el driver esté realmente conectado
+            if not driver:
+                logger.warning("Neo4j driver no disponible, usando simulador")
                 result = neo4j_simulator.simulate_recurrent_booking_analysis(int(user_id), 0)
                 if result["success"]:
-                    logger.info(f"✅ Neo4j SIMULADO: Análisis de reservas recurrentes para usuario {user_id}")
-                    logger.info(f"CU 9 SIMULADO: Relación recurrente para usuario {user_id} en {city_name}")
-                else:
-                    logger.error(f"Error en simulador Neo4j: {result.get('error')}")
+                    logger.info(f"✅ Neo4j SIMULADO: Relación recurrente para usuario {user_id} en {city_name}")
                 return
-                return
-                
-            # Asegurar que el cliente Neo4j esté inicializado
-            await neo4j.get_client()
 
+            # Ejecutar query en Neo4j REAL
             query = """
-                // Asegura que el nodo User exista (aunque la app ya debería crearlo)
-                MERGE (u:User {id: $user_id})
-
-                // Asegura que el nodo City exista (creado en la migración M003)
-                MERGE (c:City {name: $city_name})
-
-                // Crea la relación o la actualiza
-                MERGE (u)-[r:BOOKED_IN]->(c)
-                ON CREATE SET r.count = 1
-                ON MATCH SET r.count = r.count + 1
+            MERGE (u:Usuario {user_id: $user_id})
+            MERGE (c:City {name: $city_name})
+            MERGE (u)-[r:BOOKED_IN]->(c)
+            ON CREATE SET r.count = 1
+            ON MATCH SET r.count = r.count + 1
+            RETURN r.count as count
             """
 
             result = neo4j.execute_query(
-                query, {"user_id": user_id, "city_name": city_name})
+                query, parameters={"user_id": int(user_id), "city_name": city_name})
 
-            logger.info(
-                f"Relación de reserva recurrente actualizada en Neo4j para usuario {user_id} en {city_name}")
-                
+            # Verificar que la query se ejecutó correctamente
+            if result and result.get("records"):
+                count = result["records"][0]["count"]
+                logger.info(
+                    f"✅ Neo4j REAL: Relación actualizada para usuario {user_id} en {city_name} (count: {count})")
+            else:
+                logger.warning(f"Neo4j query no retornó resultados para usuario {user_id}")
+
         except Exception as e:
             # En caso de error, usar simulador como fallback
             logger.error(
-                f"Fallo en la escritura a Neo4j (reservas recurrentes): {e}")
-            
+                f"❌ Error en Neo4j (reservas recurrentes): {e}")
+
             # Fallback al simulador
             try:
                 result = neo4j_simulator.simulate_recurrent_booking_analysis(int(user_id), 0)
                 if result["success"]:
-                    logger.info(f"CU 9: Actualizada relación Neo4j para usuario {user_id} en {city_name}")
+                    logger.info(f"✅ FALLBACK: Usando simulador Neo4j para usuario {user_id} en {city_name}")
                 else:
                     logger.warning(f"Error en fallback del simulador: {result.get('error')}")
             except Exception as sim_error:

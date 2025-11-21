@@ -3,6 +3,8 @@
 Script para verificar datos disponibles en PostgreSQL para el CU3.
 """
 
+from utils.logging import configure_logging, get_logger
+from db.postgres import execute_query
 import asyncio
 import sys
 from pathlib import Path
@@ -10,8 +12,6 @@ from pathlib import Path
 # Agregar el directorio raíz al path
 sys.path.append(str(Path(__file__).parent))
 
-from db.postgres import execute_query
-from utils.logging import configure_logging, get_logger
 
 # Configurar logging
 configure_logging()
@@ -75,8 +75,10 @@ async def verificar_datos_cu3():
         """
         prop_serv = await execute_query(prop_serv_query)
         if prop_serv:
-            print(f"   Total relaciones propiedad-servicio: {prop_serv[0]['total_relaciones']}")
-            print(f"   Propiedades con servicios: {prop_serv[0]['propiedades_con_servicios']}")
+            print(
+                f"   Total relaciones propiedad-servicio: {prop_serv[0]['total_relaciones']}")
+            print(
+                f"   Propiedades con servicios: {prop_serv[0]['propiedades_con_servicios']}")
 
         # 5. Verificar disponibilidad y precios
         print("\n5. 💰 DISPONIBILIDAD Y PRECIOS:")
@@ -90,9 +92,12 @@ async def verificar_datos_cu3():
         disp_stats = await execute_query(disp_query)
         if disp_stats:
             stats = disp_stats[0]
-            print(f"   Registros de disponibilidad: {stats['total_registros']}")
-            print(f"   Propiedades con precios: {stats['propiedades_con_precios']}")
-            print(f"   Precio promedio: ${float(stats['precio_promedio'] or 0):.2f}")
+            print(
+                f"   Registros de disponibilidad: {stats['total_registros']}")
+            print(
+                f"   Propiedades con precios: {stats['propiedades_con_precios']}")
+            print(
+                f"   Precio promedio: ${float(stats['precio_promedio'] or 0):.2f}")
 
         # 6. Ejemplo de propiedades con capacidad ≥ 3 en cada ciudad
         print("\n6. 📊 PROPIEDADES CON CAPACIDAD ≥ 3 POR CIUDAD:")
@@ -107,7 +112,8 @@ async def verificar_datos_cu3():
         cap_stats = await execute_query(capacity_query)
         if cap_stats:
             for stat in cap_stats:
-                print(f"   {stat['ciudad']} (ID: {stat['ciudad_id']}): {stat['propiedades_cap_3_plus']} propiedades")
+                print(
+                    f"   {stat['ciudad']} (ID: {stat['ciudad_id']}): {stat['propiedades_cap_3_plus']} propiedades")
 
         print("\n" + "="*60)
         print("✅ Verificación completada")

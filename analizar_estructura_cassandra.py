@@ -3,6 +3,8 @@
 Script para analizar la estructura actual de Cassandra y determinar si necesitamos reestructurar.
 """
 
+from utils.logging import configure_logging, get_logger
+from db.cassandra import get_astra_client, find_documents
 import asyncio
 import sys
 from pathlib import Path
@@ -10,8 +12,6 @@ from pathlib import Path
 # Agregar el directorio raíz al path
 sys.path.append(str(Path(__file__).parent))
 
-from db.cassandra import get_astra_client, find_documents
-from utils.logging import configure_logging, get_logger
 
 # Configurar logging
 configure_logging()
@@ -26,24 +26,24 @@ async def analizar_estructura_cassandra():
 
         # Conectar a Cassandra
         database = await get_astra_client()
-        
+
         # Listar todas las colecciones
         collections = database.list_collection_names()
         print(f"📊 Colecciones disponibles: {collections}")
-        
+
         print("\n🏠 ANÁLISIS PARA CU3: Propiedades por ciudad con capacidad ≥3 y WiFi")
         print("-" * 70)
-        
+
         # Analizar la colección actual
         print("\n1️⃣ ESTRUCTURA ACTUAL 'propiedades_disponibles_por_fecha':")
         docs = await find_documents("propiedades_disponibles_por_fecha", {}, limit=3)
-        
+
         if docs:
             print(f"   📄 Ejemplo de documento:")
             for key, value in docs[0].items():
                 if key != '_id':
                     print(f"     {key}: {value} ({type(value).__name__})")
-        
+
         print(f"\n   ❌ LIMITACIONES ACTUALES:")
         print(f"     • Solo tiene IDs de propiedades, no los detalles")
         print(f"     • No incluye capacidad, WiFi, precios")
@@ -52,7 +52,7 @@ async def analizar_estructura_cassandra():
 
         print(f"\n2️⃣ PROPUESTA DE NUEVA ESTRUCTURA:")
         print(f"   🎯 COLECCIÓN 'propiedades_por_ciudad_filtros':")
-        
+
         nueva_estructura = {
             "ciudad_id": 1,
             "ciudad_nombre": "Buenos Aires",
@@ -79,7 +79,7 @@ async def analizar_estructura_cassandra():
             "total_propiedades": 2,
             "actualizado_en": "2025-11-21T04:40:00Z"
         }
-        
+
         print(f"   📄 Estructura propuesta:")
         for key, value in nueva_estructura.items():
             if key == "propiedades":
@@ -109,7 +109,7 @@ async def analizar_estructura_cassandra():
         print(f"     • CU3 debe ser una consulta Cassandra simple")
         print(f"     • No debe depender de PostgreSQL")
         print(f"     • Debe filtrar por ciudad + criterios")
-        
+
         print("\n" + "="*70)
         print("💡 CONCLUSIÓN: Necesitamos crear la nueva colección")
         print("   'propiedades_por_ciudad_filtros' para CU3 óptimo")

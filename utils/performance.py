@@ -17,7 +17,7 @@ def measure_time(func_name: str = None):
         async def async_wrapper(*args, **kwargs):
             name = func_name or func.__name__
             start_time = time.time()
-            
+
             try:
                 result = await func(*args, **kwargs)
                 execution_time = time.time() - start_time
@@ -27,12 +27,12 @@ def measure_time(func_name: str = None):
                 execution_time = time.time() - start_time
                 logger.error(f"❌ {name} falló en {execution_time:.2f}s: {e}")
                 raise
-                
+
         @wraps(func)
         def sync_wrapper(*args, **kwargs):
             name = func_name or func.__name__
             start_time = time.time()
-            
+
             try:
                 result = func(*args, **kwargs)
                 execution_time = time.time() - start_time
@@ -42,49 +42,50 @@ def measure_time(func_name: str = None):
                 execution_time = time.time() - start_time
                 logger.error(f"❌ {name} falló en {execution_time:.2f}s: {e}")
                 raise
-        
+
         if asyncio.iscoroutinefunction(func):
             return async_wrapper
         else:
             return sync_wrapper
-            
+
     return decorator
 
 
 async def batch_execute(tasks: list, batch_size: int = 10, delay: float = 0.1):
     """
     Ejecuta tareas en lotes para evitar sobrecarga del sistema.
-    
+
     Args:
         tasks: Lista de corrutinas a ejecutar
         batch_size: Tamaño del lote
         delay: Delay entre lotes en segundos
-        
+
     Returns:
         Lista de resultados
     """
     results = []
-    
+
     for i in range(0, len(tasks), batch_size):
         batch = tasks[i:i + batch_size]
-        logger.info(f"🔄 Ejecutando lote {i//batch_size + 1}/{(len(tasks)-1)//batch_size + 1} ({len(batch)} tareas)")
-        
+        logger.info(
+            f"🔄 Ejecutando lote {i//batch_size + 1}/{(len(tasks)-1)//batch_size + 1} ({len(batch)} tareas)")
+
         batch_results = await asyncio.gather(*batch, return_exceptions=True)
         results.extend(batch_results)
-        
+
         # Pequeño delay entre lotes
         if i + batch_size < len(tasks):
             await asyncio.sleep(delay)
-    
+
     return results
 
 
 class PerformanceStats:
     """Clase para recopilar estadísticas de rendimiento."""
-    
+
     def __init__(self):
         self.stats = {}
-        
+
     def record(self, operation: str, duration: float, success: bool = True):
         """Registra estadísticas de una operación."""
         if operation not in self.stats:
@@ -95,22 +96,22 @@ class PerformanceStats:
                 'failures': 0,
                 'avg_time': 0
             }
-        
+
         stats = self.stats[operation]
         stats['total_calls'] += 1
         stats['total_time'] += duration
-        
+
         if success:
             stats['successes'] += 1
         else:
             stats['failures'] += 1
-            
+
         stats['avg_time'] = stats['total_time'] / stats['total_calls']
-    
+
     def get_summary(self) -> dict:
         """Obtiene un resumen de las estadísticas."""
         return self.stats
-    
+
     def print_summary(self):
         """Imprime un resumen de las estadísticas."""
         logger.info("📊 ESTADÍSTICAS DE RENDIMIENTO:")

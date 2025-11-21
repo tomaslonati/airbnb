@@ -19,7 +19,7 @@ print("   🔧 TECNOLOGÍA: Redis Cloud")
 print("   📍 ARCHIVO: services/auth.py, services/session.py")
 
 print("\n📅 CU MULTI-DATABASE: CREACIÓN DE RESERVAS")
-print("   ✅ ESTADO: COMPLETAMENTE FUNCIONAL") 
+print("   ✅ ESTADO: COMPLETAMENTE FUNCIONAL")
 print("   📊 EVIDENCIA: Reserva #26 creada exitosamente")
 print("   💰 PRECIO: $200.0 calculado correctamente")
 print("   🔧 TECNOLOGÍAS: PostgreSQL + AstraDB + Neo4j Simulator")
@@ -37,7 +37,7 @@ print("   📊 EVIDENCIA: Reserva 26 sincronizada correctamente")
 print("   🔧 TECNOLOGÍA: AstraDB DataAPI")
 print("   📍 ARCHIVO: db/cassandra.py")
 
-# CUs PARCIALMENTE FUNCIONALES  
+# CUs PARCIALMENTE FUNCIONALES
 print("\n⚠️ CUs PARCIALMENTE FUNCIONALES:")
 print("-" * 40)
 

@@ -3,6 +3,8 @@
 Test directo de la función de Cassandra para CU3.
 """
 
+from utils.logging import configure_logging, get_logger
+from db.cassandra import get_propiedades_ciudad_capacidad_wifi
 import asyncio
 import sys
 from pathlib import Path
@@ -10,8 +12,6 @@ from pathlib import Path
 # Agregar el directorio raíz al path
 sys.path.append(str(Path(__file__).parent))
 
-from db.cassandra import get_propiedades_ciudad_capacidad_wifi
-from utils.logging import configure_logging, get_logger
 
 # Configurar logging
 configure_logging()
@@ -33,14 +33,16 @@ async def test_directo():
             min_capacidad=3,
             wifi_required=True
         )
-        
+
         print(f"📊 Resultado: {len(propiedades)} propiedades encontradas")
-        
+
         if propiedades:
             print("\n🏠 PROPIEDADES ENCONTRADAS:")
             for prop in propiedades:
-                print(f"   ID: {prop['propiedad_id']} - {prop['propiedad_nombre']}")
-                print(f"      Capacidad: {prop['capacidad_huespedes']}, WiFi: {prop['wifi']}")
+                print(
+                    f"   ID: {prop['propiedad_id']} - {prop['propiedad_nombre']}")
+                print(
+                    f"      Capacidad: {prop['capacidad_huespedes']}, WiFi: {prop['wifi']}")
                 print(f"      Precio: ${prop['precio_noche']:.2f}")
 
         # Test sin filtro de WiFi
@@ -50,9 +52,10 @@ async def test_directo():
             min_capacidad=3,
             wifi_required=False
         )
-        
-        print(f"📊 Resultado: {len(propiedades_sin_wifi)} propiedades encontradas")
-        
+
+        print(
+            f"📊 Resultado: {len(propiedades_sin_wifi)} propiedades encontradas")
+
     except Exception as e:
         print(f"❌ Error: {str(e)}")
         logger.error("Error en test directo", error=str(e))

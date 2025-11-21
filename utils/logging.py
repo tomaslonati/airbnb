@@ -25,7 +25,8 @@ def configure_logging():
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
             structlog.stdlib.PositionalArgumentsFormatter(),
-            structlog.processors.TimeStamper(fmt="%H:%M:%S"),  # Solo hora:minuto:segundo
+            structlog.processors.TimeStamper(
+                fmt="%H:%M:%S"),  # Solo hora:minuto:segundo
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
             structlog.processors.UnicodeDecoder(),
@@ -52,7 +53,7 @@ def configure_logging():
 
 def configure_simple_logging():
     """Configura logging simple sin colores para archivos o producción."""
-    
+
     logging.basicConfig(
         format="%(message)s",
         stream=sys.stdout,

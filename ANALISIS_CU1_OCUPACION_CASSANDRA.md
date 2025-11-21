@@ -3,6 +3,7 @@
 ## 📊 CÓMO FUNCIONA LA CONSULTA
 
 ### 🎯 **OBJETIVO DEL CU1**
+
 Calcular la **tasa de ocupación por ciudad** en un rango de fechas específico usando **únicamente Cassandra** sin consultas a PostgreSQL.
 
 ## 🗄️ ESTRUCTURA DE DATOS EN CASSANDRA
@@ -10,21 +11,23 @@ Calcular la **tasa de ocupación por ciudad** en un rango de fechas específico 
 ### 📋 **Colección: `ocupacion_por_ciudad`**
 
 **Esquema de documento:**
+
 ```json
 {
-  "ciudad_id": 1,                    // ID de la ciudad (clave primaria)
-  "fecha": "2025-01-01",            // Fecha específica (clave primaria)
-  "noches_ocupadas": 1,             // Contador de noches ocupadas
-  "noches_disponibles": 0           // Contador de noches disponibles
+  "ciudad_id": 1, // ID de la ciudad (clave primaria)
+  "fecha": "2025-01-01", // Fecha específica (clave primaria)
+  "noches_ocupadas": 1, // Contador de noches ocupadas
+  "noches_disponibles": 0 // Contador de noches disponibles
 }
 ```
 
 **Claves primarias:** `(ciudad_id, fecha)` - Permite consultas eficientes por ciudad y rango de fechas.
 
 ### 📊 **Datos actuales en la colección:**
+
 ```
 1. {fecha: '2025-01-01', noches_disponibles: 0, ciudad_id: 1, noches_ocupadas: 1}
-2. {fecha: '2025-01-02', noches_disponibles: 0, ciudad_id: 1, noches_ocupadas: 1} 
+2. {fecha: '2025-01-02', noches_disponibles: 0, ciudad_id: 1, noches_ocupadas: 1}
 3. {fecha: '2025-01-03', noches_disponibles: 0, ciudad_id: 1, noches_ocupadas: 1}
 4. {fecha: '2025-01-04', noches_disponibles: 0, ciudad_id: 1, noches_ocupadas: 1}
 5. {fecha: '2025-01-05', noches_disponibles: 0, ciudad_id: 1, noches_ocupadas: 1}
@@ -33,6 +36,7 @@ Calcular la **tasa de ocupación por ciudad** en un rango de fechas específico 
 ## 🔍 PROCESO DE CONSULTA PASO A PASO
 
 ### **Paso 1: Filtrado por Ciudad y Rango de Fechas**
+
 ```python
 filter_doc = {
     "ciudad_id": ciudad_id,                              # Filtra por ciudad específica
@@ -43,6 +47,7 @@ results = await find_documents("ocupacion_por_ciudad", filter_doc, limit=100)
 ```
 
 **Resultado de ejemplo:**
+
 ```python
 [
     {"ciudad_id": 1, "fecha": "2025-01-01", "noches_ocupadas": 1, "noches_disponibles": 0},
@@ -54,6 +59,7 @@ results = await find_documents("ocupacion_por_ciudad", filter_doc, limit=100)
 ```
 
 ### **Paso 2: Agregación en Memoria**
+
 ```python
 total_noches_ocupadas = 0      # Acumulador
 total_noches_disponibles = 0   # Acumulador
@@ -66,11 +72,13 @@ for data in results:
 ```
 
 **Resultados de agregación:**
+
 - `total_noches_ocupadas`: **5**
-- `total_noches_disponibles`: **0**  
+- `total_noches_disponibles`: **0**
 - `dias_con_datos`: **5**
 
 ### **Paso 3: Cálculo de Tasa de Ocupación**
+
 ```python
 total_noches = total_noches_ocupadas + total_noches_disponibles  # 5 + 0 = 5
 
@@ -83,18 +91,21 @@ if total_noches > 0:
 ## 🎯 VENTAJAS DE USAR SOLO CASSANDRA
 
 ### ✅ **Performance Optimizado**
+
 - **1 sola consulta** a Cassandra vs múltiples queries SQL
 - **Filtrado nativo** por ciudad y rango de fechas
 - **Sin JOINs** complejos entre tablas
 - **Respuesta sub-segundo** para rangos grandes
 
 ### ✅ **Escalabilidad**
+
 - **Distribución automática** por ciudad_id
 - **Particionado eficiente** por fecha
 - **Agregaciones paralelas** en múltiples nodos
 - **Tolerancia a fallos** built-in
 
 ### ✅ **Simplicidad Arquitectónica**
+
 - **Datos pre-agregados** listos para consulta
 - **Sin dependencias** de PostgreSQL para reportes
 - **Modelo de datos optimizado** para analytics
@@ -103,6 +114,7 @@ if total_noches > 0:
 ## 🔄 SINCRONIZACIÓN DE DATOS
 
 ### **Actualización Automática:**
+
 Cuando se crea/cancela una reserva:
 
 1. **PostgreSQL** → Reserva principal (transaccional)
@@ -111,8 +123,8 @@ Cuando se crea/cancela una reserva:
 ```python
 # En cada reserva nueva:
 await _update_ocupacion_ciudad(
-    ciudad_id=1, 
-    fecha="2025-01-06", 
+    ciudad_id=1,
+    fecha="2025-01-06",
     occupied_delta=1,      # +1 noche ocupada
     available_delta=-1     # -1 noche disponible
 )
@@ -132,17 +144,18 @@ await _update_ocupacion_ciudad(
 
 ```bash
 🏙️ ID de la ciudad: 1
-📅 Fecha INICIO: 2025-01-01  
+📅 Fecha INICIO: 2025-01-01
 📅 Fecha FIN: 2025-01-05
 ```
 
 ### **Resultado:**
+
 ```
 ✅ RESULTADOS PARA CIUDAD 1
 📅 Período: 2025-01-01 a 2025-01-05
 📊 Días con datos: 5
 🏠 Total noches ocupadas: 5
-🏠 Total noches disponibles: 0  
+🏠 Total noches disponibles: 0
 📈 TASA DE OCUPACIÓN: 100.00%
 ```
 
@@ -165,7 +178,7 @@ graph LR
 **La consulta CU1 es 100% Cassandra** porque:
 
 1. ✅ **Datos pre-agregados** por ciudad y fecha
-2. ✅ **Una sola query** con filtros nativos  
+2. ✅ **Una sola query** con filtros nativos
 3. ✅ **Agregación simple** en memoria
 4. ✅ **Performance óptimo** para rangos grandes
 5. ✅ **Escalabilidad automática** distribuida

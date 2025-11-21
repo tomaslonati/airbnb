@@ -3,6 +3,8 @@
 Script de prueba específico para el CU3: Búsqueda de propiedades por ciudad con capacidad ≥3 y WiFi.
 """
 
+from utils.logging import configure_logging, get_logger
+from services.reservations import ReservationService
 import asyncio
 import sys
 from pathlib import Path
@@ -10,8 +12,6 @@ from pathlib import Path
 # Agregar el directorio raíz al path
 sys.path.append(str(Path(__file__).parent))
 
-from services.reservations import ReservationService
-from utils.logging import configure_logging, get_logger
 
 # Configurar logging
 configure_logging()
@@ -36,7 +36,8 @@ async def test_cu3():
         ]
 
         for ciudad in ciudades_test:
-            print(f"\n🌆 Probando ciudad: {ciudad['nombre']} (ID: {ciudad['id']})")
+            print(
+                f"\n🌆 Probando ciudad: {ciudad['nombre']} (ID: {ciudad['id']})")
             print(f"🔍 Buscando propiedades con:")
             print(f"   📏 Capacidad ≥ 3 huéspedes")
             print(f"   📶 WiFi disponible")
@@ -53,27 +54,33 @@ async def test_cu3():
                 print(f"📊 Propiedades encontradas: {len(propiedades)}")
 
                 if propiedades:
-                    print(f"\n🏠 PROPIEDADES CON CAPACIDAD ≥3 Y WIFI EN {ciudad['nombre'].upper()}:")
+                    print(
+                        f"\n🏠 PROPIEDADES CON CAPACIDAD ≥3 Y WIFI EN {ciudad['nombre'].upper()}:")
                     print("-" * 75)
-                    print(f"{'ID':<8} {'Ciudad':<15} {'Precio':<12} {'Capacidad':<12} {'WiFi'}")
+                    print(
+                        f"{'ID':<8} {'Ciudad':<15} {'Precio':<12} {'Capacidad':<12} {'WiFi'}")
                     print("-" * 75)
 
                     for prop in propiedades:
                         prop_id = prop.get('propiedad_id', 'N/A')
-                        ciudad_nombre = prop.get('ciudad_nombre', ciudad['nombre'])[:14]
+                        ciudad_nombre = prop.get(
+                            'ciudad_nombre', ciudad['nombre'])[:14]
                         precio = f"${prop.get('precio_noche', 0):.2f}"
                         capacidad = prop.get('capacidad_huespedes', 'N/A')
                         wifi = "Sí" if prop.get('wifi', False) else "No"
-                        print(f"{prop_id:<8} {ciudad_nombre:<15} {precio:<12} {capacidad:<12} {wifi}")
+                        print(
+                            f"{prop_id:<8} {ciudad_nombre:<15} {precio:<12} {capacidad:<12} {wifi}")
 
                     print(f"\n💡 Todas las propiedades mostradas cumplen:")
                     print(f"   ✅ Capacidad para 3 o más huéspedes")
                     print(f"   ✅ WiFi disponible")
                     print(f"   🏙️ Ubicadas en {ciudad['nombre']}")
                 else:
-                    print(f"📭 No hay propiedades que cumplan los criterios en {ciudad['nombre']}")
+                    print(
+                        f"📭 No hay propiedades que cumplan los criterios en {ciudad['nombre']}")
             else:
-                print(f"❌ Error en la búsqueda para {ciudad['nombre']}: {result.get('error', 'Error desconocido')}")
+                print(
+                    f"❌ Error en la búsqueda para {ciudad['nombre']}: {result.get('error', 'Error desconocido')}")
 
         print("\n" + "="*75)
         print("✅ Caso de uso 3 completado")

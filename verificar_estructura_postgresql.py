@@ -3,6 +3,8 @@
 Script para verificar la estructura de la tabla propiedad en PostgreSQL.
 """
 
+from utils.logging import configure_logging, get_logger
+from db.postgres import execute_query
 import asyncio
 import sys
 from pathlib import Path
@@ -10,8 +12,6 @@ from pathlib import Path
 # Agregar el directorio raíz al path
 sys.path.append(str(Path(__file__).parent))
 
-from db.postgres import execute_query
-from utils.logging import configure_logging, get_logger
 
 # Configurar logging
 configure_logging()
@@ -32,15 +32,16 @@ async def verificar_estructura_postgresql():
             WHERE table_name = 'propiedad' 
             ORDER BY ordinal_position;
         """
-        
+
         columns = await execute_query(query_propiedad)
-        
+
         if columns:
             print("-" * 60)
             print(f"{'Columna':<20} {'Tipo':<20} {'Nullable':<10}")
             print("-" * 60)
             for col in columns:
-                print(f"{col['column_name']:<20} {col['data_type']:<20} {col['is_nullable']:<10}")
+                print(
+                    f"{col['column_name']:<20} {col['data_type']:<20} {col['is_nullable']:<10}")
         else:
             print("❌ No se encontraron columnas para la tabla 'propiedad'")
 
@@ -51,15 +52,16 @@ async def verificar_estructura_postgresql():
             WHERE table_name = 'ciudad' 
             ORDER BY ordinal_position;
         """
-        
+
         columns = await execute_query(query_ciudad)
-        
+
         if columns:
             print("-" * 60)
             print(f"{'Columna':<20} {'Tipo':<20} {'Nullable':<10}")
             print("-" * 60)
             for col in columns:
-                print(f"{col['column_name']:<20} {col['data_type']:<20} {col['is_nullable']:<10}")
+                print(
+                    f"{col['column_name']:<20} {col['data_type']:<20} {col['is_nullable']:<10}")
         else:
             print("❌ No se encontraron columnas para la tabla 'ciudad'")
 
@@ -72,16 +74,17 @@ async def verificar_estructura_postgresql():
             WHERE p.capacidad_huespedes >= 3
             LIMIT 5;
         """
-        
+
         examples = await execute_query(query_example)
-        
+
         if examples:
             print("-" * 60)
             print(f"{'ID':<5} {'Capacidad':<10} {'WiFi':<6} {'Ciudad':<20}")
             print("-" * 60)
             for ex in examples:
                 wifi_str = "Sí" if ex['wifi'] else "No"
-                print(f"{ex['id']:<5} {ex['capacidad_huespedes']:<10} {wifi_str:<6} {ex['ciudad_nombre']:<20}")
+                print(
+                    f"{ex['id']:<5} {ex['capacidad_huespedes']:<10} {wifi_str:<6} {ex['ciudad_nombre']:<20}")
         else:
             print("❌ No se encontraron propiedades con capacidad ≥ 3")
 

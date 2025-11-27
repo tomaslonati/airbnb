@@ -1287,11 +1287,10 @@ class ReservationService:
             ciudades_stats = {}
 
             for record in records:
-                # Acceder a los datos del record
-                record_data = record.data()
-                user_id = record_data['user_id']
-                city = record_data['city']
-                visits = record_data['visits']
+                # record ya es un diccionario (convertido en neo4j.execute_query)
+                user_id = record['user_id']
+                city = record['city']
+                visits = record['visits']
 
                 usuarios_recurrentes.append({
                     'user_id': user_id,

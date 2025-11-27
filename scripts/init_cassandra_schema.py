@@ -3,8 +3,9 @@ Script para crear las tablas CQL de Cassandra necesarias para el sistema de rese
 
 Tablas a crear:
 1. ocupacion_por_ciudad - Métricas de ocupación por ciudad y fecha
-2. propiedades_disponibles_por_fecha - Disponibilidad de propiedades por fecha  
+2. propiedades_disponibles_por_fecha - Disponibilidad de propiedades por fecha
 3. reservas_por_host_fecha - Reservas organizadas por host y fecha
+4. tasa_ocupacion_ciudad_fecha - Tasa de ocupación pre-calculada por ciudad y fecha (CU1)
 """
 
 import asyncio
@@ -72,7 +73,8 @@ class CassandraSchemaInitializer:
         tables = [
             self._get_ocupacion_por_ciudad_cql(),
             self._get_propiedades_disponibles_por_fecha_cql(),
-            self._get_reservas_por_host_fecha_cql()
+            self._get_reservas_por_host_fecha_cql(),
+            self._get_tasa_ocupacion_ciudad_fecha_cql()
         ]
 
         for table_name, cql in tables:
@@ -123,6 +125,22 @@ class CassandraSchemaInitializer:
                 PRIMARY KEY (host_id, fecha, reserva_id)
             ) WITH CLUSTERING ORDER BY (fecha DESC, reserva_id ASC)
             AND comment = 'Reservas organizadas por anfitrión y fecha para análisis'
+        """
+
+    def _get_tasa_ocupacion_ciudad_fecha_cql(self):
+        """CQL para crear la tabla de tasa de ocupación por ciudad y fecha."""
+        return "tasa_ocupacion_ciudad_fecha", """
+            CREATE TABLE IF NOT EXISTS tasa_ocupacion_ciudad_fecha (
+                ciudad_id bigint,
+                fecha date,
+                total_propiedades int,
+                propiedades_ocupadas int,
+                propiedades_disponibles int,
+                tasa_ocupacion decimal,
+                updated_at timestamp,
+                PRIMARY KEY (ciudad_id, fecha)
+            ) WITH CLUSTERING ORDER BY (fecha ASC)
+            AND comment = 'Tasa de ocupación pre-calculada por ciudad y fecha para consultas CU1'
         """
 
     async def close(self):

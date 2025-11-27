@@ -4040,72 +4040,131 @@ async def test_case_7_guest_session():
 
 
 async def test_case_1_ocupacion_ciudad():
-    """Caso de uso 1: Tasa de ocupación por ciudad en un rango de fechas."""
+    """Caso de uso 1: Tasa de ocupación por ciudad (fecha específica o rango)."""
     try:
         typer.echo("\n🏙️ CASO DE USO 1: TASA DE OCUPACIÓN POR CIUDAD")
         typer.echo("=" * 70)
-        typer.echo("📊 Calculando tasa de ocupación en un RANGO DE FECHAS")
-        typer.echo("-" * 50)
 
-        ciudad_id = typer.prompt("🏙️ ID de la ciudad", type=int)
-        fecha_inicio_str = typer.prompt("📅 Fecha INICIO (YYYY-MM-DD)")
-        fecha_fin_str = typer.prompt("📅 Fecha FIN (YYYY-MM-DD)")
+        # Preguntar modo de consulta
+        typer.echo("\n¿Qué tipo de consulta desea realizar?")
+        typer.echo("1. Fecha específica (consulta rápida O(1))")
+        typer.echo("2. Rango de fechas (agregación en memoria)")
+        modo = typer.prompt("Seleccione opción (1 o 2)", type=int)
 
-        # Validar fechas
-        try:
-            fecha_inicio = datetime.strptime(fecha_inicio_str, "%Y-%m-%d").date()
-            fecha_fin = datetime.strptime(fecha_fin_str, "%Y-%m-%d").date()
-            
-            if fecha_inicio > fecha_fin:
-                typer.echo("❌ La fecha de inicio debe ser anterior a la fecha de fin")
-                return
-                
-        except ValueError:
-            typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
+        if modo not in [1, 2]:
+            typer.echo("❌ Opción inválida. Use 1 o 2.")
             return
 
-        typer.echo(
-            f"\n🔄 Consultando ocupación de ciudad {ciudad_id} desde {fecha_inicio_str} hasta {fecha_fin_str}...")
+        ciudad_id = typer.prompt("🏙️ ID de la ciudad", type=int)
 
-        # Consultar datos de Cassandra para el rango de fechas
-        from db.cassandra import find_documents
+        if modo == 1:
+            # ========== MODO 1: FECHA ESPECÍFICA ==========
+            typer.echo("\n📊 Modo: FECHA ESPECÍFICA")
+            typer.echo("-" * 50)
 
-        # Buscar datos en el rango de fechas
-        filter_doc = {
-            "ciudad_id": ciudad_id,
-            "fecha": {"$gte": fecha_inicio_str, "$lte": fecha_fin_str}
-        }
+            fecha_str = typer.prompt("📅 Fecha (YYYY-MM-DD)")
 
-        results = await find_documents("ocupacion_por_ciudad", filter_doc, limit=100)
+            # Validar fecha
+            try:
+                fecha = datetime.strptime(fecha_str, "%Y-%m-%d").date()
+            except ValueError:
+                typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
+                return
 
-        if results:
-            total_noches_ocupadas = 0
-            total_noches_disponibles = 0
-            dias_con_datos = len(results)
-            
-            for data in results:
-                total_noches_ocupadas += data.get('noches_ocupadas', 0)
-                total_noches_disponibles += data.get('noches_disponibles', 0)
-            
-            total_noches = total_noches_ocupadas + total_noches_disponibles
+            typer.echo(f"\n🔄 Consultando ocupación de ciudad {ciudad_id} en {fecha_str}...")
 
-            if total_noches > 0:
-                tasa_ocupacion = (total_noches_ocupadas / total_noches) * 100
+            # Importar función para consulta directa
+            from db.cassandra import get_occupancy_rate_by_date
 
+            result = await get_occupancy_rate_by_date(ciudad_id, fecha_str)
+
+            if result and result.get('total_propiedades', 0) > 0:
                 typer.echo(f"\n✅ RESULTADOS PARA CIUDAD {ciudad_id}")
-                typer.echo(f"📅 Período: {fecha_inicio_str} a {fecha_fin_str}")
-                typer.echo(f"📊 Días con datos: {dias_con_datos}")
-                typer.echo(f"🏠 Total noches ocupadas: {total_noches_ocupadas}")
-                typer.echo(f"🏠 Total noches disponibles: {total_noches_disponibles}")
-                typer.echo(f"📈 TASA DE OCUPACIÓN: {tasa_ocupacion:.2f}%")
+                typer.echo(f"📅 Fecha: {fecha_str}")
+                typer.echo(f"🏠 Total propiedades: {result.get('total_propiedades', 0)}")
+                typer.echo(f"🏠 Propiedades ocupadas: {result.get('propiedades_ocupadas', 0)}")
+                typer.echo(f"🏠 Propiedades disponibles: {result.get('propiedades_disponibles', 0)}")
+                typer.echo(f"📈 TASA DE OCUPACIÓN: {result.get('tasa_ocupacion', 0):.2f}%")
+                typer.echo(f"⏰ Última actualización: {result.get('updated_at', 'N/A')}")
+
+                # Análisis
+                tasa = result.get('tasa_ocupacion', 0)
+                if tasa >= 80:
+                    typer.echo("💡 Ocupación MUY ALTA")
+                elif tasa >= 50:
+                    typer.echo("💡 Ocupación MODERADA")
+                else:
+                    typer.echo("💡 Ocupación BAJA")
             else:
-                typer.echo(f"⚠️ No hay datos de capacidad para ciudad {ciudad_id}")
+                typer.echo(f"📭 No se encontraron datos de ocupación para ciudad {ciudad_id} en {fecha_str}")
+                typer.echo("💡 Esto puede significar que:")
+                typer.echo("   • No hay propiedades registradas en esta ciudad")
+                typer.echo("   • No hay datos para esta fecha")
+
         else:
+            # ========== MODO 2: RANGO DE FECHAS ==========
+            typer.echo("\n📊 Modo: RANGO DE FECHAS")
+            typer.echo("-" * 50)
+
+            fecha_inicio_str = typer.prompt("📅 Fecha INICIO (YYYY-MM-DD)")
+            fecha_fin_str = typer.prompt("📅 Fecha FIN (YYYY-MM-DD)")
+
+            # Validar fechas
+            try:
+                fecha_inicio = datetime.strptime(fecha_inicio_str, "%Y-%m-%d").date()
+                fecha_fin = datetime.strptime(fecha_fin_str, "%Y-%m-%d").date()
+
+                if fecha_inicio > fecha_fin:
+                    typer.echo("❌ La fecha de inicio debe ser anterior a la fecha de fin")
+                    return
+
+            except ValueError:
+                typer.echo("❌ Formato de fecha inválido. Use YYYY-MM-DD")
+                return
+
             typer.echo(
-                f"📭 No se encontraron datos de ocupación para ciudad {ciudad_id} en el rango {fecha_inicio_str} - {fecha_fin_str}")
-            typer.echo("💡 Esto puede significar que:")
-            typer.echo("   • No hay propiedades registradas en esta ciudad")
-            typer.echo("   • No hay datos para este rango de fechas")
+                f"\n🔄 Consultando ocupación de ciudad {ciudad_id} desde {fecha_inicio_str} hasta {fecha_fin_str}...")
+
+            # Consultar datos de Cassandra para el rango de fechas
+            from db.cassandra import find_documents
+
+            # Buscar datos en el rango de fechas
+            filter_doc = {
+                "ciudad_id": ciudad_id,
+                "fecha": {"$gte": fecha_inicio_str, "$lte": fecha_fin_str}
+            }
+
+            results = await find_documents("ocupacion_por_ciudad", filter_doc, limit=100)
+
+            if results:
+                total_noches_ocupadas = 0
+                total_noches_disponibles = 0
+                dias_con_datos = len(results)
+
+                for data in results:
+                    total_noches_ocupadas += data.get('noches_ocupadas', 0)
+                    total_noches_disponibles += data.get('noches_disponibles', 0)
+
+                total_noches = total_noches_ocupadas + total_noches_disponibles
+
+                if total_noches > 0:
+                    tasa_ocupacion = (total_noches_ocupadas / total_noches) * 100
+
+                    typer.echo(f"\n✅ RESULTADOS PARA CIUDAD {ciudad_id}")
+                    typer.echo(f"📅 Período: {fecha_inicio_str} a {fecha_fin_str}")
+                    typer.echo(f"📊 Días con datos: {dias_con_datos}")
+                    typer.echo(f"🏠 Total noches ocupadas: {total_noches_ocupadas}")
+                    typer.echo(f"🏠 Total noches disponibles: {total_noches_disponibles}")
+                    typer.echo(f"📈 TASA DE OCUPACIÓN: {tasa_ocupacion:.2f}%")
+                else:
+                    typer.echo(f"⚠️ No hay datos de capacidad para ciudad {ciudad_id}")
+            else:
+                typer.echo(
+                    f"📭 No se encontraron datos de ocupación para ciudad {ciudad_id} en el rango {fecha_inicio_str} - {fecha_fin_str}")
+                typer.echo("💡 Esto puede significar que:")
+                typer.echo("   • No hay propiedades registradas en esta ciudad")
+                typer.echo("   • No hay datos para este rango de fechas")
+
         typer.echo("\n" + "="*70)
         typer.echo("✅ Caso de uso 1 completado")
 

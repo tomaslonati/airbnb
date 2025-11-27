@@ -189,6 +189,8 @@ async def cassandra_mark_unavailable(propiedad_id: int, fechas: list, ciudad_id:
         for fecha in fechas:
             await _update_ocupacion_ciudad(ciudad_id, fecha, occupied_delta=1, available_delta=-1)
             await _update_ocupacion_propiedad(propiedad_id, fecha, ocupada=True)
+            # Actualizar tabla de tasa de ocupación (CU1)
+            await _update_tasa_ocupacion_ciudad(ciudad_id, fecha, occupied_delta=1, available_delta=-1)
             # Remover de propiedades disponibles
             await _remove_propiedad_disponible(fecha, propiedad_id)
 
@@ -217,6 +219,8 @@ async def cassandra_mark_available(propiedad_id: int, fechas: list, ciudad_id: i
         for fecha in fechas:
             await _update_ocupacion_ciudad(ciudad_id, fecha, occupied_delta=-1, available_delta=1)
             await _update_ocupacion_propiedad(propiedad_id, fecha, ocupada=False)
+            # Actualizar tabla de tasa de ocupación (CU1)
+            await _update_tasa_ocupacion_ciudad(ciudad_id, fecha, occupied_delta=-1, available_delta=1)
             # Agregar a propiedades disponibles
             await _add_propiedad_disponible(fecha, propiedad_id, ciudad_id)
 
@@ -251,6 +255,8 @@ async def cassandra_init_date(propiedad_id: int, fechas: list, ciudad_id: int = 
             fecha_str = fecha.isoformat() if hasattr(fecha, 'isoformat') else str(fecha)
             # UPDATE atómico: incrementar noches_disponibles para esta ciudad/fecha
             await _update_ocupacion_ciudad(ciudad_id, fecha_str, occupied_delta=0, available_delta=1)
+            # Actualizar tabla de tasa de ocupación (CU1)
+            await _update_tasa_ocupacion_ciudad(ciudad_id, fecha_str, occupied_delta=0, available_delta=1)
 
         # 2. Preparar documentos para ocupación por propiedad y disponibilidad
         ocupacion_propiedad_docs = []
@@ -518,6 +524,62 @@ async def _get_propiedad_data(propiedad_id: int):
 # ============================================================================
 # FUNCIONES DE CONSULTA PARA LOS NUEVOS CU
 # ============================================================================
+
+async def get_occupancy_rate_by_date(ciudad_id: int, fecha):
+    """
+    CU 1 (Single Date): Obtiene la tasa de ocupación de una ciudad en una fecha específica.
+    Consulta O(1) directa a la tabla pre-calculada tasa_ocupacion_ciudad_fecha.
+
+    Args:
+        ciudad_id: ID de la ciudad
+        fecha: Fecha específica (date object o string)
+
+    Returns:
+        dict con:
+            - ciudad_id: ID de la ciudad
+            - fecha: Fecha consultada
+            - total_propiedades: Total de propiedades (ocupadas + disponibles)
+            - propiedades_ocupadas: Propiedades ocupadas
+            - propiedades_disponibles: Propiedades disponibles
+            - tasa_ocupacion: Porcentaje de ocupación (0-100)
+            - updated_at: Timestamp de última actualización
+    """
+    try:
+        fecha_str = fecha.isoformat() if hasattr(fecha, 'isoformat') else str(fecha)
+
+        filter_doc = {
+            "ciudad_id": ciudad_id,
+            "fecha": fecha_str
+        }
+
+        documents = await find_documents("tasa_ocupacion_ciudad_fecha", filter_doc, limit=1)
+
+        if documents:
+            result = documents[0]
+            logger.info(
+                f"[CU1 Single Date] Tasa de ocupación para ciudad {ciudad_id} en {fecha_str}: "
+                f"{result.get('tasa_ocupacion', 0)}% "
+                f"(ocupadas={result.get('propiedades_ocupadas', 0)}, "
+                f"total={result.get('total_propiedades', 0)})")
+            return result
+        else:
+            logger.warning(
+                f"[CU1 Single Date] No hay datos de ocupación para ciudad {ciudad_id} en {fecha_str}")
+            # Retornar estructura vacía
+            return {
+                "ciudad_id": ciudad_id,
+                "fecha": fecha_str,
+                "total_propiedades": 0,
+                "propiedades_ocupadas": 0,
+                "propiedades_disponibles": 0,
+                "tasa_ocupacion": 0.0,
+                "updated_at": None
+            }
+
+    except Exception as e:
+        logger.error(f"Error obteniendo tasa de ocupación por fecha: {e}")
+        return None
+
 
 async def get_propiedades_disponibles_por_fecha(fecha, ciudad_id: int = None, limit: int = 100):
     """
@@ -894,6 +956,65 @@ async def _update_ocupacion_propiedad(propiedad_id: int, fecha, ocupada: bool):
 
     except Exception as e:
         logger.error(f"Error actualizando ocupación propiedad: {e}")
+
+
+async def _update_tasa_ocupacion_ciudad(ciudad_id: int, fecha, occupied_delta: int, available_delta: int):
+    """
+    Actualiza la tabla tasa_ocupacion_ciudad_fecha con valores pre-calculados.
+    Esta tabla denormalizada permite consultas O(1) para CU1 en fecha específica.
+    """
+    try:
+        from datetime import datetime
+
+        collection = await get_collection("tasa_ocupacion_ciudad_fecha")
+
+        fecha_str = fecha.isoformat() if hasattr(fecha, 'isoformat') else str(
+            fecha) if isinstance(fecha, date) else str(fecha)
+        filter_doc = {"ciudad_id": ciudad_id, "fecha": fecha_str}
+
+        # PASO 1: Leer documento actual
+        existing_doc = collection.find_one(filter_doc)
+
+        if existing_doc:
+            # PASO 2: Calcular nuevos valores
+            new_propiedades_ocupadas = max(0, existing_doc.get("propiedades_ocupadas", 0) + occupied_delta)
+            new_propiedades_disponibles = max(0, existing_doc.get("propiedades_disponibles", 0) + available_delta)
+        else:
+            # Si no existe, usar los deltas como valores iniciales
+            new_propiedades_ocupadas = max(0, occupied_delta)
+            new_propiedades_disponibles = max(0, available_delta)
+
+        # PASO 3: Calcular total y tasa de ocupación
+        total_propiedades = new_propiedades_ocupadas + new_propiedades_disponibles
+
+        # Calcular tasa de ocupación (evitar división por cero)
+        if total_propiedades > 0:
+            tasa_ocupacion = round((new_propiedades_ocupadas / total_propiedades) * 100, 2)
+        else:
+            tasa_ocupacion = 0.0
+
+        # PASO 4: Actualizar documento
+        update_doc = {
+            "total_propiedades": total_propiedades,
+            "propiedades_ocupadas": new_propiedades_ocupadas,
+            "propiedades_disponibles": new_propiedades_disponibles,
+            "tasa_ocupacion": tasa_ocupacion,
+            "updated_at": datetime.utcnow().isoformat()
+        }
+
+        # Usar updateOne con $set para Tables (NO incluir PK en el update)
+        collection.update_one(
+            filter_doc,
+            {"$set": update_doc},
+            upsert=True
+        )
+
+        logger.debug(f"ETL tasa_ocupacion: ciudad {ciudad_id}, fecha {fecha_str}, "
+                     f"total={total_propiedades}, ocupadas={new_propiedades_ocupadas}, "
+                     f"disponibles={new_propiedades_disponibles}, tasa={tasa_ocupacion}%")
+
+    except Exception as e:
+        logger.error(f"Error actualizando tasa de ocupación ciudad: {e}")
 
 
 async def confirmar_reserva_ocupacion(ciudad_id: int, fechas: list):

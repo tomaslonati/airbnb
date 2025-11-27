@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """
 Demo del CU1: Tasa de ocupación por ciudad usando solo Cassandra.
+Soporta dos modos:
+  1. Rango de fechas (modo original)
+  2. Fecha específica (modo nuevo con tabla pre-calculada)
 """
 
 from utils.logging import configure_logging, get_logger
-from db.cassandra import get_astra_client, find_documents
+from db.cassandra import get_astra_client, find_documents, get_occupancy_rate_by_date
 import asyncio
 from datetime import datetime
 import sys
 from pathlib import Path
+import argparse
 
 # Agregar el directorio raíz al path
 sys.path.append(str(Path(__file__).parent))
@@ -19,23 +23,92 @@ configure_logging()
 logger = get_logger(__name__)
 
 
-async def demo_cu1_ocupacion():
-    """Demo del CU1: Consulta de ocupación usando solo Cassandra."""
+async def demo_cu1_single_date(ciudad_id: int = 1, fecha: str = "2025-01-01"):
+    """
+    Demo del CU1 (Modo Single Date): Consulta de ocupación para una fecha específica.
+    Usa la tabla pre-calculada tasa_ocupacion_ciudad_fecha.
+    """
     try:
-        print("\n🏙️ DEMO: CU1 - TASA DE OCUPACIÓN POR CIUDAD (SOLO CASSANDRA)")
+        print("\n🏙️ DEMO: CU1 - TASA DE OCUPACIÓN (FECHA ESPECÍFICA)")
         print("=" * 80)
 
         await get_astra_client()
 
-        # Parámetros de ejemplo
-        ciudad_id = 1
-        fecha_inicio = "2025-01-01"
-        fecha_fin = "2025-01-05"
+        print(f"🔍 CONSULTA:")
+        print(f"   🏙️ Ciudad ID: {ciudad_id} (Buenos Aires)")
+        print(f"   📅 Fecha: {fecha}")
+        print(f"   🗄️ Fuente: tasa_ocupacion_ciudad_fecha (tabla pre-calculada)")
+        print(f"   ⚡ Complejidad: O(1) - Lookup directo por clave")
+
+        print(f"\n⏱️  EJECUTANDO CONSULTA CASSANDRA...")
+        inicio = datetime.now()
+
+        # ========== CONSULTA DIRECTA ==========
+        result = await get_occupancy_rate_by_date(ciudad_id, fecha)
+
+        fin = datetime.now()
+        tiempo_consulta = (fin - inicio).total_seconds()
+
+        print(f"⚡ Consulta ejecutada en: {tiempo_consulta:.3f} segundos")
+
+        if result and result.get('total_propiedades', 0) > 0:
+            print(f"\n📊 RESULTADO DIRECTO (SIN AGREGACIÓN):")
+            print("="*50)
+            print(f"🏙️ Ciudad: Buenos Aires (ID: {ciudad_id})")
+            print(f"📅 Fecha: {fecha}")
+            print(f"🏠 Total propiedades: {result.get('total_propiedades', 0)}")
+            print(f"🏠 Propiedades ocupadas: {result.get('propiedades_ocupadas', 0)}")
+            print(f"🏠 Propiedades disponibles: {result.get('propiedades_disponibles', 0)}")
+            print(f"📈 TASA DE OCUPACIÓN: {result.get('tasa_ocupacion', 0):.2f}%")
+            print(f"⏰ Última actualización: {result.get('updated_at', 'N/A')}")
+            print(f"⚡ Tiempo de consulta: {tiempo_consulta:.3f}s")
+
+            # Análisis del resultado
+            tasa = result.get('tasa_ocupacion', 0)
+            print(f"\n💡 ANÁLISIS:")
+            if tasa == 100:
+                print("   🔥 ¡Ocupación TOTAL! Todas las propiedades están reservadas")
+            elif tasa >= 80:
+                print("   📈 Ocupación MUY ALTA - Excelente demanda")
+            elif tasa >= 50:
+                print("   📊 Ocupación MODERADA - Demanda regular")
+            else:
+                print("   📉 Ocupación BAJA - Oportunidad de mejora")
+
+        else:
+            print(f"\n📭 No se encontraron datos para:")
+            print(f"   🏙️ Ciudad {ciudad_id}")
+            print(f"   📅 Fecha {fecha}")
+
+        print(f"\n🎯 VENTAJAS DEL MODO SINGLE DATE:")
+        print(f"   ✅ Consulta O(1) - Lookup directo por clave primaria")
+        print(f"   ✅ Sin agregación en memoria (pre-calculado)")
+        print(f"   ✅ Datos siempre actualizados en tiempo real")
+        print(f"   ✅ Performance ultra-rápida (sub-milisegundos)")
+        print(f"   ✅ Ideal para dashboards y consultas frecuentes")
+
+        print("\n" + "="*80)
+
+    except Exception as e:
+        print(f"❌ Error en demo CU1 (single date): {str(e)}")
+        logger.error("Error en demo CU1 (single date)", error=str(e))
+
+
+async def demo_cu1_date_range(ciudad_id: int = 1, fecha_inicio: str = "2025-01-01", fecha_fin: str = "2025-01-05"):
+    """
+    Demo del CU1 (Modo Range): Consulta de ocupación para un rango de fechas.
+    Usa la tabla ocupacion_por_ciudad y agrega en memoria.
+    """
+    try:
+        print("\n🏙️ DEMO: CU1 - TASA DE OCUPACIÓN (RANGO DE FECHAS)")
+        print("=" * 80)
+
+        await get_astra_client()
 
         print(f"🔍 CONSULTA:")
         print(f"   🏙️ Ciudad ID: {ciudad_id} (Buenos Aires)")
         print(f"   📅 Rango: {fecha_inicio} a {fecha_fin}")
-        print(f"   🗄️ Fuente: Solo Cassandra (ocupacion_por_ciudad)")
+        print(f"   🗄️ Fuente: ocupacion_por_ciudad (agregación en memoria)")
 
         print(f"\n⏱️  EJECUTANDO CONSULTA CASSANDRA...")
         inicio = datetime.now()
@@ -143,4 +216,23 @@ async def demo_cu1_ocupacion():
 
 
 if __name__ == "__main__":
-    asyncio.run(demo_cu1_ocupacion())
+    parser = argparse.ArgumentParser(description='Demo CU1: Tasa de ocupación por ciudad')
+    parser.add_argument('--mode', type=str, choices=['single', 'range', 'both'], default='both',
+                        help='Modo de consulta: single (fecha específica), range (rango de fechas), both (ambos)')
+    parser.add_argument('--ciudad', type=int, default=1, help='ID de la ciudad')
+    parser.add_argument('--fecha', type=str, default='2025-01-01', help='Fecha específica (modo single)')
+    parser.add_argument('--fecha-inicio', type=str, default='2025-01-01', help='Fecha inicio (modo range)')
+    parser.add_argument('--fecha-fin', type=str, default='2025-01-05', help='Fecha fin (modo range)')
+
+    args = parser.parse_args()
+
+    async def run_demos():
+        if args.mode == 'single':
+            await demo_cu1_single_date(args.ciudad, args.fecha)
+        elif args.mode == 'range':
+            await demo_cu1_date_range(args.ciudad, args.fecha_inicio, args.fecha_fin)
+        else:  # both
+            await demo_cu1_single_date(args.ciudad, args.fecha)
+            await demo_cu1_date_range(args.ciudad, args.fecha_inicio, args.fecha_fin)
+
+    asyncio.run(run_demos())

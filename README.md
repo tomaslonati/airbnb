@@ -1,5 +1,7 @@
 # Airbnb Backend - Sistema Multi-Base de Datos
 
+> **English summary.** Airbnb-style backend CLI (university project) that uses five cloud databases, each for what it does best: PostgreSQL (Supabase) for transactional data, Redis for cache and sessions, Cassandra (AstraDB) for event logs, MongoDB Atlas for analytics and Neo4j (AuraDB) for user-relationship graphs. Built with Python 3.10+, Typer, Pydantic and asyncio.
+
 Backend CLI para un sistema tipo Airbnb que utiliza múltiples bases de datos en la nube para diferentes casos de uso.
 
 ## 🏗️ Arquitectura
